@@ -15,16 +15,16 @@
       "type": "image/png"
     }
   ],
+  "screenshots": [
+    {
+      "src": "/screenshot1.PNG",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ],
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#ffffff"
 }
-"screenshots": [
-  {
-    "src": "/screenshot1.PNG",
-    "sizes": "1280x720",
-    "type": "image/png",
-    "form_factor": "wide"
-  }
-]

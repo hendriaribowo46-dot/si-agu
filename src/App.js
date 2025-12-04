@@ -3,7 +3,7 @@ import {
   Save, Users, School, BookOpen, FileText, 
   Settings, Printer, Plus, Trash2, Edit, 
   ChevronRight, BarChart2, Upload, Download, Check,
-  LogOut, Lock, Mail
+  LogOut, Lock, Mail, AlertTriangle, GraduationCap, FileSpreadsheet, Image as ImageIcon
 } from 'lucide-react';
 
 // Firebase Imports
@@ -28,8 +28,8 @@ import {
   where
 } from "firebase/firestore";
 
-// --- KONFIGURASI FIREBASE ---
-// ⚠️ PENTING: GANTI NILAI DI BAWAH INI DENGAN CONFIG DARI FIREBASE CONSOLE ANDA
+// --- KONFIGURASI FIREBASE MANUAL ---
+// ⚠️ GANTI BAGIAN INI DENGAN CONFIG DARI FIREBASE CONSOLE ANDA ⚠️
 const firebaseConfig = {
   apiKey: "AIzaSyBJ6ys7BbNxSPHdOtWG_kWI_hqlOwdg7jQ",
   authDomain: "gurupro-app.firebaseapp.com",
@@ -39,16 +39,30 @@ const firebaseConfig = {
   appId: "1:411502537546:web:7135e7322ca2e933b5efb3"
 };
 
-// Inisialisasi Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Inisialisasi Firebase Aman
+let app = null;
+let auth = null;
+let db = null;
+let configError = null;
 
-// ID Aplikasi (Bisa diganti sesuka hati untuk nama folder di database)
+try {
+  if (firebaseConfig.apiKey === "ISI_API_KEY_ANDA_DISINI") {
+    throw new Error("API Key belum diisi.");
+  }
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (error) {
+  console.error("Firebase Init Error:", error);
+  configError = error.message;
+}
+
 const appId = 'e-spn-sekolah';
 
 // --- MAIN APP COMPONENT ---
 export default function App() {
+  if (configError) return <ConfigErrorScreen error={configError} />;
+
   const [user, setUser] = useState(null);
   const [activeMenu, setActiveMenu] = useState('pengaturan'); 
   
@@ -62,14 +76,10 @@ export default function App() {
   const [kelas, setKelas] = useState([]);
   const [siswa, setSiswa] = useState([]);
   const [nilaiData, setNilaiData] = useState({}); 
-  
-  // Loading State
   const [loading, setLoading] = useState(true);
 
-  // Helper context key
   const currentContextKey = `${tahunPelajaran.replace(/\//g, '-')}_${semester}`;
 
-  // Nama koleksi dinamis
   const collections = useMemo(() => ({
     settings: 'settings', 
     kelas: `kelas_${currentContextKey}`,
@@ -77,9 +87,9 @@ export default function App() {
     nilai: `nilai_${currentContextKey}`
   }), [currentContextKey]);
 
-  // --- AUTHENTICATION INIT ---
+  // Auth & Data Fetching
   useEffect(() => {
-    // Listener status login
+    if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -87,91 +97,93 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- DATA FETCHING (REALTIME) ---
   useEffect(() => {
-    if (!user) return;
-
+    if (!user || !db) return;
     setLoading(true);
 
-    // 1. Fetch Identitas & Guru (Global Settings)
-    const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.settings), (snapshot) => {
-      snapshot.docs.forEach(doc => {
-        if (doc.id === 'identitas') setIdentitas(doc.data());
-        if (doc.id === 'guru') setGuru(doc.data().list || []);
+    try {
+      const unsubSettings = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.settings), (snapshot) => {
+        snapshot.docs.forEach(doc => {
+          if (doc.id === 'identitas') setIdentitas(doc.data());
+          if (doc.id === 'guru') setGuru(doc.data().list || []);
+        });
       });
-    }, (err) => console.error("Settings error", err));
 
-    // 2. Fetch Kelas
-    const unsubKelas = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.kelas), (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setKelas(list.sort((a, b) => a.nama.localeCompare(b.nama)));
-    }, (err) => console.error("Kelas error", err));
-
-    // 3. Fetch Siswa
-    const unsubSiswa = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.siswa), (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setSiswa(list);
-    }, (err) => console.error("Siswa error", err));
-
-    // 4. Fetch Nilai
-    const unsubNilai = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.nilai), (snapshot) => {
-      const data = {};
-      snapshot.docs.forEach(doc => {
-        data[doc.id] = doc.data();
+      const unsubKelas = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.kelas), (snapshot) => {
+        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setKelas(list.sort((a, b) => a.nama.localeCompare(b.nama)));
       });
-      setNilaiData(data);
+
+      const unsubSiswa = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.siswa), (snapshot) => {
+        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setSiswa(list);
+      });
+
+      const unsubNilai = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, collections.nilai), (snapshot) => {
+        const data = {};
+        snapshot.docs.forEach(doc => {
+          data[doc.id] = doc.data();
+        });
+        setNilaiData(data);
+        setLoading(false);
+      });
+
+      return () => {
+        unsubSettings(); unsubKelas(); unsubSiswa(); unsubNilai();
+      };
+    } catch (e) {
+      console.error(e);
       setLoading(false);
-    }, (err) => console.error("Nilai error", err));
-
-    return () => {
-      unsubSettings();
-      unsubKelas();
-      unsubSiswa();
-      unsubNilai();
-    };
+    }
   }, [user, collections]);
 
-  // --- HELPERS ---
+  // Helpers
   const saveToFirestore = async (collectionKey, docId, data, merge = true) => {
-    if (!user) return;
+    if (!user || !db) return;
     const actualCollectionName = collections[collectionKey] || collectionKey;
     try {
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, actualCollectionName, docId), data, { merge });
     } catch (e) {
-      console.error("Save Error:", e);
-      alert("Gagal menyimpan data. Pastikan Firestore Rules mengizinkan write.");
+      alert(`Gagal menyimpan: ${e.message}`);
     }
   };
   
   const deleteFromFirestore = async (collectionKey, docId) => {
-    if (!user) return;
+    if (!user || !db) return;
     const actualCollectionName = collections[collectionKey] || collectionKey;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, actualCollectionName, docId));
-    } catch (e) {
-      console.error("Delete Error:", e);
-      alert("Gagal menghapus data.");
-    }
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, actualCollectionName, docId));
   };
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      alert("Gagal keluar: " + error.message);
-    }
+    await signOut(auth);
   };
 
-  // --- RENDERERS ---
-
-  if (loading) return <div className="flex h-screen items-center justify-center bg-gray-100 text-gray-600">Sinkronisasi Data...</div>;
-
-  if (!user) {
-    return <AuthScreen />;
-  }
+  if (loading) return <div className="flex h-screen items-center justify-center bg-gray-100 text-gray-600 animate-pulse">Memuat e-SPN...</div>;
+  if (!user) return <AuthScreen />;
 
   return (
-    <div className="flex h-screen bg-gray-100 font-sans text-gray-800 overflow-hidden">
+    <div className="flex h-screen bg-gray-100 font-sans text-gray-800 overflow-hidden print:overflow-visible print:h-auto print:block">
+      {/* CSS KHUSUS CETAK UNTUK MENGATASI PREVIEW KOSONG */}
+      <style>{`
+        @media print {
+          @page { margin: 1cm; size: landscape; }
+          body, #root, main { 
+            height: auto !important; 
+            overflow: visible !important; 
+            background: white !important;
+            display: block !important;
+          }
+          aside, .print\\:hidden, nav, button { 
+            display: none !important; 
+          }
+          /* Pastikan tabel tidak terpotong */
+          table { page-break-inside: auto; width: 100% !important; }
+          tr { page-break-inside: avoid; page-break-after: auto; }
+          /* Reset warna text agar hitam pekat */
+          * { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
+        }
+      `}</style>
+
       {/* SIDEBAR */}
       <aside className="w-64 bg-slate-800 text-white flex flex-col print:hidden shadow-xl z-20">
         <div className="p-4 border-b border-slate-700 flex items-center gap-2">
@@ -182,11 +194,7 @@ export default function App() {
         <div className="p-4 bg-slate-900 border-b border-slate-700">
           <div className="mb-3">
             <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Tahun Pelajaran</label>
-            <select 
-              value={tahunPelajaran} 
-              onChange={(e) => setTahunPelajaran(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-600 text-white text-sm rounded mt-1 p-2 focus:ring-2 focus:ring-blue-500 outline-none"
-            >
+            <select value={tahunPelajaran} onChange={(e) => setTahunPelajaran(e.target.value)} className="w-full bg-slate-800 border border-slate-600 text-white text-sm rounded mt-1 p-2 focus:outline-none">
               <option>2023-2024</option>
               <option>2024-2025</option>
               <option>2025-2026</option>
@@ -195,21 +203,12 @@ export default function App() {
               <option>2028-2029</option>
             </select>
           </div>
-
           <div>
             <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Semester</label>
-            <select 
-              value={semester} 
-              onChange={(e) => setSemester(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-600 text-white text-sm rounded mt-1 p-2 focus:ring-2 focus:ring-blue-500 outline-none"
-            >
+            <select value={semester} onChange={(e) => setSemester(e.target.value)} className="w-full bg-slate-800 border border-slate-600 text-white text-sm rounded mt-1 p-2 focus:outline-none">
               <option>Ganjil</option>
               <option>Genap</option>
             </select>
-          </div>
-          
-          <div className="mt-3 text-xs text-yellow-500 bg-yellow-900/30 p-2 rounded border border-yellow-700/50">
-             Mode: {tahunPelajaran} ({semester})
           </div>
         </div>
 
@@ -217,102 +216,83 @@ export default function App() {
           <MenuItem icon={<Settings size={18} />} label="Pengaturan" active={activeMenu === 'pengaturan'} onClick={() => setActiveMenu('pengaturan')} />
           <MenuItem icon={<School size={18} />} label="Data Kelas" active={activeMenu === 'kelas'} onClick={() => setActiveMenu('kelas')} />
           <MenuItem icon={<Users size={18} />} label="Data Siswa" active={activeMenu === 'siswa'} onClick={() => setActiveMenu('siswa')} />
-          <MenuItem icon={<Edit size={18} />} label="Penilaian" active={activeMenu === 'penilaian'} onClick={() => setActiveMenu('penilaian')} />
+          <MenuItem icon={<Edit size={18} />} label="Input Nilai" active={activeMenu === 'penilaian'} onClick={() => setActiveMenu('penilaian')} />
           <MenuItem icon={<BarChart2 size={18} />} label="Analisis Nilai" active={activeMenu === 'analisis'} onClick={() => setActiveMenu('analisis')} />
-          <MenuItem icon={<Printer size={18} />} label="Laporan & Cetak" active={activeMenu === 'laporan'} onClick={() => setActiveMenu('laporan')} />
+          <MenuItem icon={<GraduationCap size={18} />} label="Nilai Akhir (FIX)" active={activeMenu === 'nilaiakhir'} onClick={() => setActiveMenu('nilaiakhir')} />
+          <MenuItem icon={<Printer size={18} />} label="Laporan & Export" active={activeMenu === 'laporan'} onClick={() => setActiveMenu('laporan')} />
         </nav>
 
         <div className="p-4 border-t border-slate-700">
-           <button 
-             onClick={handleLogout}
-             className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm transition-colors"
-           >
+           <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm transition-colors mb-2">
              <LogOut size={16} /> Keluar
            </button>
-           <div className="mt-2 text-xs text-slate-500 text-center truncate px-1">
-             {user.email}
-           </div>
+           <div className="w-full bg-slate-700/50 p-2 rounded text-xs text-slate-400 text-center border border-slate-600 truncate">{user.email}</div>
         </div>
       </aside>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 overflow-y-auto bg-gray-50 p-6 print:p-0 print:bg-white">
+      <main className="flex-1 overflow-y-auto bg-gray-50 p-6 print:p-0 print:bg-white print:overflow-visible print:h-auto">
         <div className="mb-6 print:hidden flex justify-between items-center">
             <div>
-              <h2 className="text-xl font-bold text-gray-800">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  {activeMenu === 'pengaturan' && <Settings className="text-blue-600"/>}
+                  {activeMenu === 'kelas' && <School className="text-blue-600"/>}
+                  {activeMenu === 'siswa' && <Users className="text-blue-600"/>}
+                  {activeMenu === 'penilaian' && <Edit className="text-blue-600"/>}
+                  {activeMenu === 'analisis' && <BarChart2 className="text-blue-600"/>}
+                  {activeMenu === 'nilaiakhir' && <GraduationCap className="text-blue-600"/>}
+                  {activeMenu === 'laporan' && <Printer className="text-blue-600"/>}
+
                   {activeMenu === 'pengaturan' ? 'Pengaturan Umum' : 
                    activeMenu === 'kelas' ? 'Data Kelas' :
                    activeMenu === 'siswa' ? 'Data Siswa' :
-                   activeMenu === 'penilaian' ? 'Input Nilai' :
-                   activeMenu === 'analisis' ? 'Analisis Nilai' : 'Laporan'}
+                   activeMenu === 'penilaian' ? 'Input Nilai & TP' :
+                   activeMenu === 'analisis' ? 'Analisis & Remedial' : 
+                   activeMenu === 'nilaiakhir' ? 'Nilai Akhir & Rapor' : 'Laporan & Export'}
               </h2>
               {activeMenu !== 'pengaturan' && (
-                <p className="text-sm text-blue-600 font-semibold bg-blue-50 inline-block px-2 py-1 rounded border border-blue-100 mt-1">
+                <p className="text-sm text-blue-600 font-semibold bg-blue-50 inline-block px-3 py-1 rounded-full border border-blue-100 mt-1 shadow-sm">
                   Data Aktif: {tahunPelajaran} - {semester}
                 </p>
               )}
             </div>
         </div>
 
-        {activeMenu === 'pengaturan' && (
-          <Pengaturan 
-            identitas={identitas} 
-            guru={guru} 
-            onSaveIdentitas={(data) => saveToFirestore('settings', 'identitas', data)}
-            onSaveGuru={(list) => saveToFirestore('settings', 'guru', { list })}
-          />
-        )}
-        {activeMenu === 'kelas' && (
-          <DataKelas 
-            kelas={kelas} 
-            onSave={(cls) => saveToFirestore('kelas', cls.id, cls)}
-            onDelete={(id) => {
-              if(!confirm('Hapus kelas ini dari tahun pelajaran aktif?')) return;
-              deleteFromFirestore('kelas', id);
-            }}
-          />
-        )}
-        {activeMenu === 'siswa' && (
-          <DataSiswa 
-            siswa={siswa} 
-            kelas={kelas}
-            onSave={(s) => saveToFirestore('siswa', s.id, s)}
-            onDelete={(id) => {
-              if(!confirm('Hapus siswa dari tahun pelajaran aktif?')) return;
-              deleteFromFirestore('siswa', id);
-            }}
-          />
-        )}
+        {activeMenu === 'pengaturan' && <Pengaturan identitas={identitas} guru={guru} onSaveIdentitas={(data) => saveToFirestore('settings', 'identitas', data)} onSaveGuru={(list) => saveToFirestore('settings', 'guru', { list })} />}
+        {activeMenu === 'kelas' && <DataKelas kelas={kelas} onSave={(cls) => saveToFirestore('kelas', cls.id, cls)} onDelete={(id) => {if(confirm('Hapus kelas?')) deleteFromFirestore('kelas', id)}} />}
+        {activeMenu === 'siswa' && <DataSiswa siswa={siswa} kelas={kelas} onSave={(s) => saveToFirestore('siswa', s.id, s)} onDelete={(id) => {if(confirm('Hapus siswa?')) deleteFromFirestore('siswa', id)}} />}
+        
         {activeMenu === 'penilaian' && (
           <Penilaian 
-            siswa={siswa} 
-            kelas={kelas} 
-            guru={guru}
-            docPrefix={`${currentContextKey}`}
-            nilaiData={nilaiData}
+            siswa={siswa} kelas={kelas} guru={guru}
+            docPrefix={`${currentContextKey}`} nilaiData={nilaiData}
             onSaveNilai={(keySuffix, data) => saveToFirestore('nilai', `${currentContextKey}_${keySuffix}`, data)}
           />
         )}
+        
         {activeMenu === 'analisis' && (
           <Analisis 
-            siswa={siswa}
-            kelas={kelas}
-            guru={guru}
-            docPrefix={`${currentContextKey}`}
-            nilaiData={nilaiData}
+            siswa={siswa} kelas={kelas} guru={guru}
+            docPrefix={`${currentContextKey}`} nilaiData={nilaiData}
             onSaveNilai={(keySuffix, data) => saveToFirestore('nilai', `${currentContextKey}_${keySuffix}`, data)}
           />
         )}
+
+        {/* MENU NILAI AKHIR */}
+        {activeMenu === 'nilaiakhir' && (
+          <NilaiAkhir 
+            identitas={identitas} siswa={siswa} kelas={kelas} guru={guru}
+            docPrefix={`${currentContextKey}`} nilaiData={nilaiData}
+            tp={tahunPelajaran} sem={semester}
+          />
+        )}
+
+        {/* MENU LAPORAN LENGKAP */}
         {activeMenu === 'laporan' && (
-          <Laporan 
-            identitas={identitas}
-            siswa={siswa}
-            kelas={kelas}
-            guru={guru}
-            docPrefix={`${currentContextKey}`}
-            nilaiData={nilaiData}
-            tp={tahunPelajaran}
-            sem={semester}
+          <LaporanLengkap 
+            identitas={identitas} siswa={siswa} kelas={kelas} guru={guru}
+            docPrefix={`${currentContextKey}`} nilaiData={nilaiData}
+            tp={tahunPelajaran} sem={semester}
           />
         )}
       </main>
@@ -320,7 +300,283 @@ export default function App() {
   );
 }
 
-// --- AUTH SCREEN COMPONENT ---
+// --- SUB COMPONENTS ---
+
+// Helper untuk Export Excel
+const exportTableToExcel = (tableId, filename = 'Laporan.xls') => {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const html = table.outerHTML;
+  // Blob untuk format XLS (HTML based)
+  const blob = new Blob([`
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:x='urn:schemas-microsoft-com:office:excel' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head><meta charset='utf-8'></head><body>${html}</body></html>
+  `], { type: 'application/vnd.ms-excel' });
+  
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+function LaporanLengkap({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, sem }) {
+  const [view, setView] = useState('menu'); // menu, nilaiuh, analisis, rekapasli, rekapakhir
+  const [config, setConfig] = useState({ kelasId: '', mapel: '', uh: 'uh1' });
+
+  const handlePrint = () => window.print();
+  const handleExport = () => exportTableToExcel('laporan-table', `Laporan_${view}_${config.kelasId}.xls`);
+
+  const selectedKelasData = kelas.find(k => k.id === config.kelasId);
+  const selectedGuru = guru.find(g => g.mapel === config.mapel);
+  const docId = config.kelasId && config.mapel ? `${docPrefix}_${config.kelasId}_${config.mapel}` : null;
+  const currentData = nilaiData[docId] || { kktp: 75, scores: {}, weights: {uh:1, pts:1, pas:1}, tp: [] };
+  const filteredSiswa = siswa.filter(s => s.kelasId === config.kelasId);
+
+  // Helper Logic
+  const getEffectiveScore = (scores, uhKey) => {
+    if (!scores) return 0;
+    const original = parseFloat(scores[uhKey] || 0);
+    const remedial = scores[`remedial_${uhKey}`];
+    return (remedial !== undefined && remedial !== '' && !isNaN(remedial)) ? parseFloat(remedial) : original;
+  };
+
+  const calculateFinal = (scores, weights, useEffective = true) => {
+    if (!scores) return 0;
+    let sum = 0, count = 0;
+    ['uh1','uh2','uh3','uh4','uh5'].forEach(k => {
+      const val = useEffective ? getEffectiveScore(scores, k) : parseFloat(scores[k]||0);
+      if (val > 0) { sum += val; count++; }
+    });
+    const avg = count ? sum/count : 0;
+    const w = weights || {uh:1,pts:1,pas:1};
+    return ((avg*w.uh + (scores.pts||0)*w.pts + (scores.pas||0)*w.pas)/(w.uh+w.pts+w.pas));
+  };
+
+  // FORMAT TANGGAL INDONESIA (02 Desember 2025)
+  const today = new Date().toLocaleDateString('id-ID', {
+    day: '2-digit', 
+    month: 'long', 
+    year: 'numeric'
+  });
+
+  const ReportHeader = ({ title }) => (
+    <div className="text-center border-b-2 border-black pb-4 mb-6 hidden print:block">
+      <div className="flex items-center justify-center gap-4 mb-4">
+         {identitas.logoUrl && <img src={identitas.logoUrl} alt="Logo" className="h-24 w-24 object-contain"/>}
+         <div className="text-left">
+            <h1 className="text-2xl font-bold uppercase tracking-wide">{identitas.namaSekolah || 'NAMA SEKOLAH'}</h1>
+            <p className="text-sm font-medium">{identitas.alamat}</p>
+            {identitas.npsn && <p className="text-sm">NPSN: {identitas.npsn}</p>}
+         </div>
+      </div>
+      <h2 className="font-bold text-lg mt-2 uppercase border-t-2 border-black pt-2">{title}</h2>
+      <div className="flex justify-between text-sm mt-2 px-4 font-semibold">
+        <span>Mapel: {config.mapel}</span>
+        <span>Kelas: {selectedKelasData?.nama}</span>
+        <span>Tahun Pelajaran: {tp} ({sem})</span>
+      </div>
+    </div>
+  );
+
+  const ReportFooter = () => (
+    <div className="hidden print:flex justify-between mt-10 px-8 text-sm break-inside-avoid">
+       <div className="text-center"><p>Mengetahui,</p><p>Kepala Sekolah</p><br/><br/><br/><p className="font-bold underline">{identitas.kepsek}</p><p>NIP. {identitas.nipKepsek}</p></div>
+       <div className="text-center"><p>{identitas.kotaCetak}, {today}</p><p>Guru Mata Pelajaran</p><br/><br/><br/><p className="font-bold underline">{selectedGuru?.nama}</p><p>NIP. {selectedGuru?.nip}</p></div>
+    </div>
+  );
+
+  if (view === 'menu') {
+    return (
+      <div className="max-w-2xl mx-auto bg-white p-8 rounded shadow space-y-6">
+        <h2 className="text-2xl font-bold text-center mb-6">Pusat Laporan & Export</h2>
+        <div className="grid gap-4 bg-gray-50 p-4 rounded border">
+           <div className="grid grid-cols-2 gap-4">
+             <div><label className="font-bold text-xs">Kelas</label><select className="w-full border p-2 rounded" value={config.kelasId} onChange={e => setConfig({...config, kelasId: e.target.value})}><option value="">Pilih...</option>{kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}</select></div>
+             <div><label className="font-bold text-xs">Mapel</label><select className="w-full border p-2 rounded" value={config.mapel} onChange={e => setConfig({...config, mapel: e.target.value})}><option value="">Pilih...</option>{guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel}</option>)}</select></div>
+           </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+           <button onClick={() => setView('nilaiuh')} className="p-4 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 flex flex-col items-center"><FileText size={24} className="mb-2 text-blue-600"/><span className="font-bold text-sm">Nilai Ulangan Harian</span><span className="text-xs text-gray-500">Nilai Murni per UH</span></button>
+           <button onClick={() => setView('analisis')} className="p-4 bg-purple-50 border border-purple-200 rounded hover:bg-purple-100 flex flex-col items-center"><BarChart2 size={24} className="mb-2 text-purple-600"/><span className="font-bold text-sm">Analisis Penilaian</span><span className="text-xs text-gray-500">Ketuntasan & Perbaikan</span></button>
+           <button onClick={() => setView('rekapasli')} className="p-4 bg-orange-50 border border-orange-200 rounded hover:bg-orange-100 flex flex-col items-center"><FileText size={24} className="mb-2 text-orange-600"/><span className="font-bold text-sm">Rekap Nilai Asli</span><span className="text-xs text-gray-500">Sebelum Remedial</span></button>
+           <button onClick={() => setView('rekapakhir')} className="p-4 bg-green-50 border border-green-200 rounded hover:bg-green-100 flex flex-col items-center"><GraduationCap size={24} className="mb-2 text-green-600"/><span className="font-bold text-sm">Rekap Nilai Akhir</span><span className="text-xs text-gray-500">Rapor (Setelah Remedial)</span></button>
+        </div>
+      </div>
+    )
+  }
+
+  // Common wrapper for reports
+  const ReportWrapper = ({ children, title }) => (
+    <div className="bg-white min-h-screen p-8 animate-in fade-in">
+      <div className="print:hidden flex justify-between mb-4 sticky top-0 bg-white/95 p-3 border-b z-50 shadow-sm">
+         <div className="flex items-center gap-2">
+            <button onClick={() => setView('menu')} className="text-gray-600 hover:text-gray-900 flex items-center gap-1 font-bold"><ChevronRight className="rotate-180" size={16}/> Kembali</button>
+            {view === 'analisis' && <select className="border p-1 rounded text-sm ml-2" value={config.uh} onChange={e=>setConfig({...config, uh: e.target.value})}>{[1,2,3,4,5].map(i=><option key={i} value={`uh${i}`}>UH {i}</option>)}</select>}
+         </div>
+         <div className="flex gap-2">
+            <button onClick={handleExport} className="bg-green-600 text-white px-3 py-1.5 rounded flex items-center gap-2 text-sm shadow hover:bg-green-700"><FileSpreadsheet size={16}/> Export Excel</button>
+            <button onClick={handlePrint} className="bg-blue-600 text-white px-3 py-1.5 rounded flex items-center gap-2 text-sm shadow hover:bg-blue-700"><Printer size={16}/> Cetak</button>
+         </div>
+      </div>
+      {config.kelasId && config.mapel ? (
+        <>
+          <ReportHeader title={title} />
+          {children}
+          <ReportFooter />
+        </>
+      ) : <div className="text-center p-10 text-gray-400">Silakan pilih kelas dan mapel kembali.</div>}
+    </div>
+  );
+
+  // 1. NILAI UH (MURNI)
+  if (view === 'nilaiuh') {
+    return (
+      <ReportWrapper title="DAFTAR NILAI ULANGAN HARIAN (MURNI)">
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr><th className="border border-black p-2 w-10">No</th><th className="border border-black p-2 text-left">Nama Siswa</th><th className="border border-black p-2 w-12">UH1</th><th className="border border-black p-2 w-12">UH2</th><th className="border border-black p-2 w-12">UH3</th><th className="border border-black p-2 w-12">UH4</th><th className="border border-black p-2 w-12">UH5</th></tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => (
+              <tr key={s.id}>
+                <td className="border border-black p-1 text-center">{i+1}</td>
+                <td className="border border-black p-1">{s.nama}</td>
+                {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{currentData.scores[s.id]?.[`uh${u}`]||'-'}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+
+  // 2. ANALISIS UH
+  if (view === 'analisis') {
+    const uhIdx = parseInt(config.uh.slice(2));
+    const tpDesc = currentData.tp[uhIdx-1] || '-';
+    return (
+      <ReportWrapper title={`ANALISIS HASIL PENILAIAN (${config.uh.toUpperCase()})`}>
+        <div className="mb-4 text-sm border p-2"><strong>TP:</strong> {tpDesc} | <strong>KKTP:</strong> {currentData.kktp}</div>
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr><th className="border border-black p-2">No</th><th className="border border-black p-2 text-left">Nama</th><th className="border border-black p-2">Nilai</th><th className="border border-black p-2">Ketuntasan</th><th className="border border-black p-2">Tindak Lanjut</th><th className="border border-black p-2">Nilai Perbaikan</th><th className="border border-black p-2">Catatan</th></tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => {
+              const val = currentData.scores[s.id]?.[config.uh] || 0;
+              const tuntas = val >= currentData.kktp;
+              const rem = currentData.scores[s.id]?.[`remedial_${config.uh}`] || '-';
+              const note = currentData.scores[s.id]?.[`note_${config.uh}`] || '-';
+              return (
+                <tr key={s.id}>
+                  <td className="border border-black p-1 text-center">{i+1}</td>
+                  <td className="border border-black p-1">{s.nama}</td>
+                  <td className="border border-black p-1 text-center">{val}</td>
+                  <td className="border border-black p-1 text-center">{tuntas?'Tuntas':'Belum'}</td>
+                  <td className="border border-black p-1 text-center">{tuntas?'Pengayaan':'Remedial'}</td>
+                  <td className="border border-black p-1 text-center">{rem}</td>
+                  <td className="border border-black p-1">{note}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+
+  // 3. REKAP NILAI ASLI (BELUM REMIDI)
+  if (view === 'rekapasli') {
+    return (
+      <ReportWrapper title="REKAP NILAI ASLI (PRA-REMEDIAL)">
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="border border-black p-2" rowSpan="2">No</th><th className="border border-black p-2 text-left" rowSpan="2">Nama</th>
+              <th className="border border-black p-1" colSpan="5">Nilai UH (Murni)</th>
+              <th className="border border-black p-2" rowSpan="2">Rata UH</th><th className="border border-black p-2" rowSpan="2">PTS</th><th className="border border-black p-2" rowSpan="2">PAS</th><th className="border border-black p-2" rowSpan="2">NA Murni</th>
+            </tr>
+            <tr>{[1,2,3,4,5].map(i=><th key={i} className="border border-black p-1 w-8">{i}</th>)}</tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => {
+              const sc = currentData.scores[s.id] || {};
+              const finalMurni = calculateFinal(sc, currentData.weights, false);
+              let sum=0, c=0; ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{if(sc[k]>0){sum+=parseFloat(sc[k]);c++}});
+              const avg = c?sum/c:0;
+              return (
+                <tr key={s.id}>
+                  <td className="border border-black p-1 text-center">{i+1}</td>
+                  <td className="border border-black p-1">{s.nama}</td>
+                  {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{sc[`uh${u}`]||'-'}</td>)}
+                  <td className="border border-black p-1 text-center font-bold bg-gray-50">{avg.toFixed(0)}</td>
+                  <td className="border border-black p-1 text-center">{sc.pts||'-'}</td>
+                  <td className="border border-black p-1 text-center">{sc.pas||'-'}</td>
+                  <td className="border border-black p-1 text-center font-bold">{finalMurni.toFixed(0)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+
+  // 4. REKAP NILAI AKHIR (RAPOR)
+  if (view === 'rekapakhir') {
+    return (
+      <ReportWrapper title="REKAP NILAI AKHIR (RAPOR)">
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="border border-black p-2" rowSpan="2">No</th><th className="border border-black p-2 text-left" rowSpan="2">Nama</th>
+              <th className="border border-black p-1" colSpan="5">Nilai UH (Efektif/Setelah Remidi)</th>
+              <th className="border border-black p-2" rowSpan="2">Rata UH</th><th className="border border-black p-2" rowSpan="2">PTS</th><th className="border border-black p-2" rowSpan="2">PAS</th><th className="border border-black p-2 bg-gray-200" rowSpan="2">NA Akhir</th><th className="border border-black p-2" rowSpan="2">Ket</th>
+            </tr>
+            <tr>{[1,2,3,4,5].map(i=><th key={i} className="border border-black p-1 w-8">{i}</th>)}</tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => {
+              const sc = currentData.scores[s.id] || {};
+              const final = calculateFinal(sc, currentData.weights, true);
+              let sum=0, c=0; ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{const v=getEffectiveScore(sc,k);if(v>0){sum+=v;c++}});
+              const avg = c?sum/c:0;
+              return (
+                <tr key={s.id}>
+                  <td className="border border-black p-1 text-center">{i+1}</td>
+                  <td className="border border-black p-1">{s.nama}</td>
+                  {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{getEffectiveScore(sc,`uh${u}`)||'-'}</td>)}
+                  <td className="border border-black p-1 text-center font-bold bg-blue-50">{avg.toFixed(0)}</td>
+                  <td className="border border-black p-1 text-center bg-yellow-50">{sc.pts||'-'}</td>
+                  <td className="border border-black p-1 text-center bg-green-50">{sc.pas||'-'}</td>
+                  <td className="border border-black p-1 text-center font-bold bg-gray-200">{final.toFixed(0)}</td>
+                  <td className="border border-black p-1 text-center text-xs">{final>=currentData.kktp?'Tuntas':'Belum'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+}
+
+// --- SUB COMPONENTS LAIN (ConfigErrorScreen, AuthScreen, dll tetap sama) ---
+
+function ConfigErrorScreen({ error }) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+      <div className="bg-white p-8 rounded-xl shadow-xl max-w-lg w-full text-center border-t-4 border-red-500">
+        <div className="bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"><AlertTriangle size={32} className="text-red-600" /></div>
+        <h2 className="text-2xl font-bold text-gray-800 mb-3">Konfigurasi Firebase Diperlukan</h2>
+        <p className="text-gray-600 mb-6">{error === "API Key belum diisi." ? "Anda perlu memasukkan API Key dan konfigurasi Firebase Anda di file App.jsx baris 33." : `Error: ${error}`}</p>
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen() {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
@@ -329,1049 +585,418 @@ function AuthScreen() {
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
+    e.preventDefault(); setError(''); setLoading(true);
     try {
-      if (isRegister) {
-        await createUserWithEmailAndPassword(auth, email, password);
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-      }
-    } catch (err) {
-      console.error(err);
-      let msg = "Terjadi kesalahan.";
-      if (err.code === 'auth/invalid-email') msg = "Format email salah.";
-      if (err.code === 'auth/user-not-found') msg = "Pengguna tidak ditemukan.";
-      if (err.code === 'auth/wrong-password') msg = "Password salah.";
-      if (err.code === 'auth/email-already-in-use') msg = "Email sudah terdaftar.";
-      if (err.code === 'auth/weak-password') msg = "Password terlalu lemah (min 6 karakter).";
-      if (err.code === 'auth/invalid-credential') msg = "Email atau password salah.";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
+      if (isRegister) await createUserWithEmailAndPassword(auth, email, password);
+      else await signInWithEmailAndPassword(auth, email, password);
+    } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-100 p-4">
-      <div className="w-full max-w-md bg-white rounded-lg shadow-xl overflow-hidden">
-        <div className="bg-slate-800 p-6 text-center">
-           <BookOpen className="w-12 h-12 text-blue-400 mx-auto mb-2" />
-           <h1 className="text-2xl font-bold text-white">e-SPN</h1>
-           <p className="text-slate-400 text-sm">Sistem Pengolahan Nilai Sekolah</p>
-        </div>
-        
-        <div className="p-8">
-           <h2 className="text-xl font-semibold text-gray-800 mb-6 text-center">
-             {isRegister ? 'Buat Akun Baru' : 'Masuk ke Aplikasi'}
-           </h2>
-
-           {error && (
-             <div className="mb-4 p-3 bg-red-100 border border-red-200 text-red-700 rounded text-sm text-center">
-               {error}
-             </div>
-           )}
-
-           <form onSubmit={handleSubmit} className="space-y-4">
-             <div>
-               <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-               <div className="relative">
-                 <Mail className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-                 <input 
-                   type="email" 
-                   required
-                   className="pl-10 w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
-                   placeholder="nama@sekolah.sch.id"
-                   value={email}
-                   onChange={e => setEmail(e.target.value)}
-                 />
-               </div>
-             </div>
-             
-             <div>
-               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-               <div className="relative">
-                 <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-                 <input 
-                   type="password" 
-                   required
-                   className="pl-10 w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
-                   placeholder="******"
-                   value={password}
-                   onChange={e => setPassword(e.target.value)}
-                 />
-               </div>
-             </div>
-
-             <button 
-               type="submit" 
-               disabled={loading}
-               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg transition-colors flex justify-center items-center"
-             >
-               {loading ? (
-                 <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-               ) : (
-                 isRegister ? 'Daftar Sekarang' : 'Masuk'
-               )}
-             </button>
-           </form>
-
-           <div className="mt-6 text-center text-sm">
-             <span className="text-gray-500">
-               {isRegister ? 'Sudah punya akun? ' : 'Belum punya akun? '}
-             </span>
-             <button 
-               onClick={() => { setIsRegister(!isRegister); setError(''); }}
-               className="text-blue-600 font-semibold hover:underline"
-             >
-               {isRegister ? 'Login disini' : 'Daftar disini'}
-             </button>
-           </div>
-        </div>
+      <div className="w-full max-w-md bg-white rounded-lg shadow-xl overflow-hidden p-8">
+        <h2 className="text-xl font-bold text-center mb-6">{isRegister ? 'Daftar' : 'Login'} e-SPN</h2>
+        {error && <div className="mb-4 text-red-500 text-sm text-center">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input type="email" required className="w-full border p-2 rounded" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}/>
+          <input type="password" required className="w-full border p-2 rounded" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)}/>
+          <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded">{loading ? 'Loading...' : (isRegister ? 'Daftar' : 'Masuk')}</button>
+        </form>
+        <button onClick={()=>setIsRegister(!isRegister)} className="w-full text-center text-sm text-blue-600 mt-4">{isRegister ? 'Sudah punya akun?' : 'Buat akun baru'}</button>
       </div>
     </div>
   );
 }
 
-// --- SUB-COMPONENTS ---
-
 function MenuItem({ icon, label, active, onClick }) {
   return (
-    <button 
-      onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors border-l-4
-        ${active ? 'bg-slate-700 text-white border-blue-500' : 'border-transparent text-slate-300 hover:bg-slate-700 hover:text-white'}`}
-    >
-      {icon}
-      {label}
-    </button>
+    <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all border-l-4 ${active ? 'bg-slate-700 text-white border-blue-500' : 'border-transparent text-slate-300 hover:bg-slate-700'}`}>{icon} {label}</button>
   );
 }
 
-// 1. PENGATURAN
 function Pengaturan({ identitas, guru, onSaveIdentitas, onSaveGuru }) {
   const [localIdentitas, setLocalIdentitas] = useState(identitas || {});
-  const [localGuru, setLocalGuru] = useState(guru || []);
   const [newGuru, setNewGuru] = useState({ nama: '', nip: '', mapel: '' });
-
   useEffect(() => { setLocalIdentitas(identitas || {}) }, [identitas]);
-  useEffect(() => { setLocalGuru(guru || []) }, [guru]);
 
-  const handleSaveIdentitas = () => {
-    onSaveIdentitas(localIdentitas);
-    alert('Identitas Sekolah Disimpan');
-  };
+  const addGuru = () => { if(newGuru.nama) { onSaveGuru([...guru, {...newGuru, id:Date.now().toString()}]); setNewGuru({nama:'',nip:'',mapel:''}); }};
+  const delGuru = (id) => { onSaveGuru(guru.filter(g=>g.id!==id)); };
 
-  const handleAddGuru = () => {
-    if (!newGuru.nama) return;
-    const updated = [...localGuru, { ...newGuru, id: Date.now().toString() }];
-    onSaveGuru(updated);
-    setNewGuru({ nama: '', nip: '', mapel: '' });
-  };
-
-  const handleDeleteGuru = (id) => {
-    const updated = localGuru.filter(g => g.id !== id);
-    onSaveGuru(updated);
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 500000) { 
+        alert("Ukuran file terlalu besar! Harap gunakan gambar di bawah 500KB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setLocalIdentitas({ ...localIdentitas, logoUrl: reader.result });
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      {/* Identitas Sekolah */}
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><School size={20}/> Identitas Sekolah (Global)</h3>
-        <p className="text-xs text-gray-500 mb-4">Pengaturan ini berlaku untuk semua tahun pelajaran.</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <InputGroup label="Nama Sekolah" value={localIdentitas.namaSekolah} onChange={v => setLocalIdentitas({...localIdentitas, namaSekolah: v})} />
-          <InputGroup label="NPSN / Kode" value={localIdentitas.npsn} onChange={v => setLocalIdentitas({...localIdentitas, npsn: v})} />
-          <InputGroup label="Alamat Sekolah" value={localIdentitas.alamat} onChange={v => setLocalIdentitas({...localIdentitas, alamat: v})} />
-          <InputGroup label="Nama Kepala Sekolah" value={localIdentitas.kepsek} onChange={v => setLocalIdentitas({...localIdentitas, kepsek: v})} />
-          <InputGroup label="NIP Kepala Sekolah" value={localIdentitas.nipKepsek} onChange={v => setLocalIdentitas({...localIdentitas, nipKepsek: v})} />
-          <InputGroup label="Kota Cetak Dokumen" value={localIdentitas.kotaCetak} onChange={v => setLocalIdentitas({...localIdentitas, kotaCetak: v})} />
-          <InputGroup type="date" label="Tanggal Cetak Dokumen" value={localIdentitas.tglCetak} onChange={v => setLocalIdentitas({...localIdentitas, tglCetak: v})} />
+      <div className="bg-white p-6 rounded shadow">
+        <h3 className="font-bold mb-4">Identitas Sekolah</h3>
+        <div className="grid md:grid-cols-2 gap-4">
+          <InputGroup label="Nama Sekolah" value={localIdentitas.namaSekolah} onChange={v=>setLocalIdentitas({...localIdentitas,namaSekolah:v})}/>
+          <InputGroup label="NPSN" value={localIdentitas.npsn} onChange={v=>setLocalIdentitas({...localIdentitas,npsn:v})}/>
+          <InputGroup label="Alamat" value={localIdentitas.alamat} onChange={v=>setLocalIdentitas({...localIdentitas,alamat:v})}/>
+          <InputGroup label="Kepala Sekolah" value={localIdentitas.kepsek} onChange={v=>setLocalIdentitas({...localIdentitas,kepsek:v})}/>
+          <InputGroup label="NIP Kepsek" value={localIdentitas.nipKepsek} onChange={v=>setLocalIdentitas({...localIdentitas,nipKepsek:v})}/>
+          
+          {/* LOGO UPLOAD INPUT */}
           <div className="md:col-span-2">
-             <label className="block text-sm font-medium text-gray-700">Logo URL (Link Gambar)</label>
-             <input type="text" className="w-full mt-1 p-2 border rounded" value={localIdentitas.logoUrl || ''} onChange={(e) => setLocalIdentitas({...localIdentitas, logoUrl: e.target.value})} placeholder="https://..." />
+             <label className="block text-sm font-medium text-gray-700 mb-1">Logo Sekolah</label>
+             <div className="flex items-center gap-4">
+               {localIdentitas.logoUrl && (
+                 <img src={localIdentitas.logoUrl} alt="Logo" className="h-16 w-16 object-contain border p-1 rounded bg-gray-50" />
+               )}
+               <label className="cursor-pointer bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded flex items-center gap-2 text-sm transition-colors">
+                 <ImageIcon size={16}/> {localIdentitas.logoUrl ? 'Ganti Logo' : 'Upload Logo'}
+                 <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+               </label>
+               <span className="text-xs text-gray-400">Max 500KB (JPG/PNG)</span>
+             </div>
           </div>
+
+          <InputGroup label="Kota Cetak" value={localIdentitas.kotaCetak} onChange={v=>setLocalIdentitas({...localIdentitas,kotaCetak:v})}/>
+          <InputGroup label="Tanggal Cetak" type="date" value={localIdentitas.tglCetak} onChange={v=>setLocalIdentitas({...localIdentitas,tglCetak:v})}/>
         </div>
-        <div className="mt-4 flex justify-end">
-          <button onClick={handleSaveIdentitas} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center gap-2">
-            <Save size={16} /> Simpan Identitas
-          </button>
-        </div>
+        <button onClick={()=>onSaveIdentitas(localIdentitas)} className="mt-4 bg-blue-600 text-white px-4 py-2 rounded">Simpan</button>
       </div>
-
-      {/* Data Guru */}
-      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><Users size={20}/> Data Guru & Mata Pelajaran (Global)</h3>
+      <div className="bg-white p-6 rounded shadow">
+        <h3 className="font-bold mb-4">Data Guru</h3>
         <div className="flex gap-2 mb-4 items-end">
-          <InputGroup label="Nama Guru" value={newGuru.nama} onChange={v => setNewGuru({...newGuru, nama: v})} />
-          <InputGroup label="NIP" value={newGuru.nip} onChange={v => setNewGuru({...newGuru, nip: v})} />
-          <InputGroup label="Mapel Diampu" value={newGuru.mapel} onChange={v => setNewGuru({...newGuru, mapel: v})} />
-          <button onClick={handleAddGuru} className="bg-green-600 text-white px-4 py-2 rounded h-10 mb-[1px] hover:bg-green-700"><Plus size={20}/></button>
+          <InputGroup label="Nama" value={newGuru.nama} onChange={v=>setNewGuru({...newGuru,nama:v})}/>
+          <InputGroup label="Mapel" value={newGuru.mapel} onChange={v=>setNewGuru({...newGuru,mapel:v})}/>
+          <button onClick={addGuru} className="bg-green-600 text-white px-4 py-2 rounded h-10 mb-[1px]"><Plus/></button>
         </div>
-
-        <table className="w-full text-sm text-left border rounded overflow-hidden">
-          <thead className="bg-gray-100 text-gray-700">
-            <tr>
-              <th className="p-2 border">Nama Guru</th>
-              <th className="p-2 border">NIP</th>
-              <th className="p-2 border">Mata Pelajaran</th>
-              <th className="p-2 border text-center">Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {localGuru.map((g) => (
-              <tr key={g.id} className="border-b hover:bg-gray-50">
-                <td className="p-2 border">{g.nama}</td>
-                <td className="p-2 border">{g.nip}</td>
-                <td className="p-2 border">{g.mapel}</td>
-                <td className="p-2 border text-center">
-                  <button onClick={() => handleDeleteGuru(g.id)} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
-                </td>
-              </tr>
-            ))}
-            {localGuru.length === 0 && <tr><td colSpan="4" className="p-4 text-center text-gray-400">Belum ada data guru</td></tr>}
-          </tbody>
+        <table className="w-full text-sm text-left">
+          <thead className="bg-gray-100"><tr><th className="p-2">Nama</th><th className="p-2">Mapel</th><th className="p-2">Aksi</th></tr></thead>
+          <tbody>{guru.map(g=><tr key={g.id} className="border-b"><td className="p-2">{g.nama}</td><td className="p-2">{g.mapel}</td><td className="p-2"><button onClick={()=>delGuru(g.id)} className="text-red-500"><Trash2 size={16}/></button></td></tr>)}</tbody>
         </table>
       </div>
     </div>
   );
 }
 
-// 2. DATA KELAS
 function DataKelas({ kelas, onSave, onDelete }) {
   const [form, setForm] = useState({ id: '', nama: '', tingkat: '' });
-  const [isEditing, setIsEditing] = useState(false);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const id = isEditing ? form.id : Date.now().toString();
-    onSave({ ...form, id });
-    setForm({ id: '', nama: '', tingkat: '' });
-    setIsEditing(false);
-  };
-
+  const handleSubmit = (e) => { e.preventDefault(); onSave({...form, id: form.id || Date.now().toString()}); setForm({id:'',nama:'',tingkat:''}); };
+  
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-       <div className="grid md:grid-cols-3 gap-6">
-          <form onSubmit={handleSubmit} className="bg-white p-4 rounded shadow border h-fit">
-            <h3 className="font-semibold mb-3">{isEditing ? 'Edit Kelas' : 'Tambah Kelas Baru'}</h3>
-            <div className="space-y-3">
-              <InputGroup label="Nama Kelas (Contoh: VII A)" value={form.nama} onChange={v => setForm({...form, nama: v})} />
-              <div className="flex flex-col">
-                <label className="text-sm font-medium text-gray-700 mb-1">Tingkat</label>
-                <select className="border p-2 rounded" value={form.tingkat} onChange={e => setForm({...form, tingkat: e.target.value})}>
-                   <option value="">Pilih Tingkat</option>
-                   <option value="7">7</option>
-                   <option value="8">8</option>
-                   <option value="9">9</option>
-                   <option value="10">10</option>
-                   <option value="11">11</option>
-                   <option value="12">12</option>
-                </select>
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button type="submit" className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Simpan</button>
-                {isEditing && <button type="button" onClick={() => {setIsEditing(false); setForm({id:'', nama:'', tingkat:''})}} className="px-3 bg-gray-200 rounded">Batal</button>}
-              </div>
-            </div>
-          </form>
-
-          <div className="md:col-span-2 bg-white p-4 rounded shadow border">
-             <table className="w-full text-sm text-left">
-                <thead className="bg-gray-100 font-semibold">
-                  <tr>
-                    <th className="p-3 border-b">Nama Kelas</th>
-                    <th className="p-3 border-b">Tingkat</th>
-                    <th className="p-3 border-b text-center">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {kelas.map(k => (
-                    <tr key={k.id} className="border-b hover:bg-gray-50">
-                      <td className="p-3">{k.nama}</td>
-                      <td className="p-3">{k.tingkat}</td>
-                      <td className="p-3 text-center flex justify-center gap-2">
-                        <button onClick={() => {setForm(k); setIsEditing(true)}} className="text-blue-500 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button>
-                        <button onClick={() => onDelete(k.id)} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
-                      </td>
-                    </tr>
-                  ))}
-                  {kelas.length === 0 && <tr><td colSpan="3" className="p-4 text-center text-gray-400">Belum ada kelas untuk tahun ajaran ini</td></tr>}
-                </tbody>
-             </table>
-          </div>
-       </div>
+    <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+      <form onSubmit={handleSubmit} className="bg-white p-4 rounded shadow h-fit space-y-3">
+        <h3 className="font-bold">Kelola Kelas</h3>
+        <InputGroup label="Nama Kelas" value={form.nama} onChange={v=>setForm({...form,nama:v})}/>
+        <InputGroup label="Tingkat" value={form.tingkat} onChange={v=>setForm({...form,tingkat:v})}/>
+        <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded">Simpan</button>
+      </form>
+      <div className="md:col-span-2 bg-white p-4 rounded shadow">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-gray-100"><tr><th className="p-2">Kelas</th><th className="p-2">Tingkat</th><th className="p-2">Aksi</th></tr></thead>
+          <tbody>{kelas.map(k=><tr key={k.id} className="border-b"><td className="p-2">{k.nama}</td><td className="p-2">{k.tingkat}</td><td className="p-2"><button onClick={()=>setForm(k)} className="text-blue-500 mr-2"><Edit size={16}/></button><button onClick={()=>onDelete(k.id)} className="text-red-500"><Trash2 size={16}/></button></td></tr>)}</tbody>
+        </table>
+      </div>
     </div>
   )
 }
 
-// 3. DATA SISWA
 function DataSiswa({ siswa, kelas, onSave, onDelete }) {
-  const [filterKelas, setFilterKelas] = useState('');
   const [form, setForm] = useState({ id: '', nama: '', nis: '', gender: 'L', kelasId: '' });
-  const [isImporting, setIsImporting] = useState(false);
-  const [importText, setImportText] = useState('');
+  const [filter, setFilter] = useState('');
+  const [isImport, setIsImport] = useState(false);
+  const [txt, setTxt] = useState('');
 
-  const filteredSiswa = filterKelas 
-    ? siswa.filter(s => s.kelasId === filterKelas)
-    : siswa;
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if(!form.kelasId) return alert("Pilih kelas!");
-    const id = form.id || Date.now().toString();
-    onSave({ ...form, id });
-    setForm({ id: '', nama: '', nis: '', gender: 'L', kelasId: filterKelas || '' });
+  const handleImp = () => { 
+    if(!filter) return alert('Pilih filter kelas dulu');
+    txt.split('\n').forEach((l,i) => { const [n,ni,g]=l.split(','); if(n) onSave({id:Date.now()+i+'',nama:n.trim(),nis:ni?.trim()||'-',gender:g?.trim()||'L',kelasId:filter}) });
+    setIsImport(false);
   };
 
-  const handleImport = () => {
-    // Simple CSV parser: Nama, NIS, L/P
-    // Assumes importing into currently selected filterKelas
-    if(!filterKelas) return alert("Pilih kelas filter terlebih dahulu untuk import ke kelas tersebut.");
-    
-    const lines = importText.trim().split('\n');
-    lines.forEach((line, idx) => {
-      const [nama, nis, gender] = line.split(',').map(s => s.trim());
-      if(nama) {
-        const id = Date.now().toString() + idx;
-        onSave({ id, nama, nis: nis || '-', gender: gender || 'L', kelasId: filterKelas });
-      }
-    });
-    setImportText('');
-    setIsImporting(false);
-    alert(`Berhasil import ${lines.length} siswa.`);
-  };
+  const filtered = filter ? siswa.filter(s=>s.kelasId===filter) : siswa;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-       <div className="flex justify-between items-center border-b pb-2">
-         <div className="flex gap-2">
-           <button onClick={() => setIsImporting(!isImporting)} className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700">
-             <Upload size={16}/> {isImporting ? 'Tutup Import' : 'Import Data'}
-           </button>
-         </div>
-       </div>
-
-       {isImporting && (
-         <div className="bg-yellow-50 p-4 border border-yellow-200 rounded text-sm">
-           <p className="font-bold mb-2 text-yellow-800">Import Masal (Format: Nama, NIS, L/P)</p>
-           <p className="mb-2">Pastikan Anda memilih filter kelas di bawah sebelum import. Copy paste data dari Excel ke sini.</p>
-           <textarea 
-             className="w-full h-32 p-2 border rounded font-mono text-xs" 
-             placeholder={`Budi Santoso, 1234, L\nSiti Aminah, 1235, P`}
-             value={importText}
-             onChange={e => setImportText(e.target.value)}
-           ></textarea>
-           <button onClick={handleImport} className="mt-2 bg-blue-600 text-white px-4 py-1 rounded">Proses Import</button>
-         </div>
-       )}
-
-       <div className="grid md:grid-cols-4 gap-6">
-         {/* Form & Filter */}
-         <div className="bg-white p-4 rounded shadow border h-fit space-y-4">
-           <div>
-             <label className="text-sm font-bold text-gray-700">Filter Kelas</label>
-             <select className="w-full border p-2 rounded mt-1" value={filterKelas} onChange={e => setFilterKelas(e.target.value)}>
-               <option value="">Semua Kelas</option>
-               {kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-             </select>
-           </div>
-           
-           <hr/>
-           <form onSubmit={handleSubmit} className="space-y-3">
-              <h3 className="font-semibold text-gray-700">Input Siswa</h3>
-              <InputGroup label="Nama Lengkap" value={form.nama} onChange={v => setForm({...form, nama: v})} />
-              <InputGroup label="NIS / NISN" value={form.nis} onChange={v => setForm({...form, nis: v})} />
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase">Jenis Kelamin</label>
-                <select className="w-full border p-2 rounded text-sm mt-1" value={form.gender} onChange={e => setForm({...form, gender: e.target.value})}>
-                  <option value="L">Laki-laki</option>
-                  <option value="P">Perempuan</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase">Kelas</label>
-                <select className="w-full border p-2 rounded text-sm mt-1" value={form.kelasId} onChange={e => setForm({...form, kelasId: e.target.value})}>
-                  <option value="">Pilih Kelas...</option>
-                  {kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-                </select>
-              </div>
-              <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 mt-2">Simpan Siswa</button>
-           </form>
-         </div>
-
-         {/* Table */}
-         <div className="md:col-span-3 bg-white p-4 rounded shadow border">
-           <div className="mb-2 text-sm text-gray-500">Menampilkan {filteredSiswa.length} siswa</div>
-           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-gray-100 font-semibold text-gray-600">
-                <tr>
-                  <th className="p-3 border-b">Nama</th>
-                  <th className="p-3 border-b">L/P</th>
-                  <th className="p-3 border-b">NIS</th>
-                  <th className="p-3 border-b">Kelas</th>
-                  <th className="p-3 border-b text-center">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSiswa.map(s => {
-                  const namaKelas = kelas.find(k => k.id === s.kelasId)?.nama || '?';
-                  return (
-                    <tr key={s.id} className="border-b hover:bg-gray-50">
-                      <td className="p-2 font-medium">{s.nama}</td>
-                      <td className="p-2 text-center">{s.gender}</td>
-                      <td className="p-2">{s.nis}</td>
-                      <td className="p-2">{namaKelas}</td>
-                      <td className="p-2 text-center flex justify-center gap-2">
-                        <button onClick={() => setForm(s)} className="text-blue-500 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button>
-                        <button onClick={() => onDelete(s.id)} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {filteredSiswa.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-gray-400">Belum ada data siswa di kelas ini pada tahun ajaran aktif</td></tr>}
-              </tbody>
-            </table>
-           </div>
-         </div>
-       </div>
+      <div className="flex justify-between border-b pb-2">
+        <h2 className="font-bold text-xl">Data Siswa</h2>
+        <button onClick={()=>setIsImport(!isImport)} className="bg-green-600 text-white px-3 py-1 rounded text-sm"><Upload size={14} className="inline"/> Import</button>
+      </div>
+      {isImport && <div className="bg-yellow-50 p-4 border rounded"><textarea className="w-full h-24 border p-2 text-xs" placeholder="Nama, NIS, L/P" value={txt} onChange={e=>setTxt(e.target.value)}/><button onClick={handleImp} className="mt-2 bg-blue-600 text-white px-3 py-1 rounded">Proses</button></div>}
+      <div className="grid md:grid-cols-4 gap-6">
+        <div className="bg-white p-4 rounded shadow h-fit space-y-3">
+          <label className="font-bold text-sm">Filter Kelas</label>
+          <select className="w-full border p-2 rounded" value={filter} onChange={e=>setFilter(e.target.value)}><option value="">Semua</option>{kelas.map(k=><option key={k.id} value={k.id}>{k.nama}</option>)}</select>
+          <hr/>
+          <h3 className="font-bold text-sm">Input Siswa</h3>
+          <InputGroup label="Nama" value={form.nama} onChange={v=>setForm({...form,nama:v})}/>
+          <InputGroup label="NIS" value={form.nis} onChange={v=>setForm({...form,nis:v})}/>
+          <div><label className="text-xs font-bold text-gray-500">L/P</label><select className="w-full border p-2 rounded" value={form.gender} onChange={e=>setForm({...form,gender:e.target.value})}><option value="L">L</option><option value="P">P</option></select></div>
+          <div><label className="text-xs font-bold text-gray-500">Kelas</label><select className="w-full border p-2 rounded" value={form.kelasId} onChange={e=>setForm({...form,kelasId:e.target.value})}><option value="">Pilih...</option>{kelas.map(k=><option key={k.id} value={k.id}>{k.nama}</option>)}</select></div>
+          <button onClick={()=>{if(form.kelasId){onSave({...form,id:form.id||Date.now()+''});setForm({id:'',nama:'',nis:'',gender:'L',kelasId:filter||''})}}} className="w-full bg-blue-600 text-white py-2 rounded">Simpan</button>
+        </div>
+        <div className="md:col-span-3 bg-white p-4 rounded shadow overflow-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-100"><tr><th className="p-2">Nama</th><th className="p-2">L/P</th><th className="p-2">Kelas</th><th className="p-2">Aksi</th></tr></thead>
+            <tbody>{filtered.map(s=><tr key={s.id} className="border-b"><td className="p-2">{s.nama}</td><td className="p-2">{s.gender}</td><td className="p-2">{kelas.find(k=>k.id===s.kelasId)?.nama}</td><td className="p-2 flex gap-2"><button onClick={()=>setForm(s)} className="text-blue-500"><Edit size={16}/></button><button onClick={()=>onDelete(s.id)} className="text-red-500"><Trash2 size={16}/></button></td></tr>)}</tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
 
-// 4. PENILAIAN (GRADING)
 function Penilaian({ siswa, kelas, guru, docPrefix, nilaiData, onSaveNilai }) {
-  const [selectedKelas, setSelectedKelas] = useState('');
-  const [selectedMapel, setSelectedMapel] = useState('');
+  const [k, setK] = useState(''); const [m, setM] = useState('');
+  const [data, setData] = useState({ kktp:75, tp:['','','','',''], weights:{uh:1,pts:1,pas:1}, scores:{} });
+  const docId = k&&m ? `${docPrefix}_${k}_${m}` : null;
+
+  useEffect(()=>{ if(docId && nilaiData[docId]) setData(nilaiData[docId]); else setData({kktp:75,tp:['','','','',''],weights:{uh:1,pts:1,pas:1},scores:{}}) },[docId,nilaiData]);
   
-  // Local state for the current editing sheet
-  const [currentData, setCurrentData] = useState({
-    kktp: 75,
-    tp: ['', '', '', '', ''], // 5 TPs for UH1-5
-    weights: { uh: 1, pts: 1, pas: 1 },
-    scores: {} // { studentId: { uh1, uh2, uh3, uh4, uh5, pts, pas } }
-  });
-
-  const docId = selectedKelas && selectedMapel ? `${docPrefix}_${selectedKelas}_${selectedMapel}` : null;
-
-  // Load data when selection changes
-  useEffect(() => {
-    if (docId && nilaiData[docId]) {
-      setCurrentData(nilaiData[docId]);
-    } else {
-      // Reset if no data exists
-      setCurrentData({
-        kktp: 75,
-        tp: ['', '', '', '', ''],
-        weights: { uh: 2, pts: 1, pas: 1 },
-        scores: {}
-      });
-    }
-  }, [docId, nilaiData]);
-
-  const handleScoreChange = (studentId, field, value) => {
-    const val = parseFloat(value) || 0;
-    setCurrentData(prev => ({
-      ...prev,
-      scores: {
-        ...prev.scores,
-        [studentId]: {
-          ...prev.scores[studentId],
-          [field]: val
-        }
-      }
-    }));
+  const handleChange = (sid, field, val) => {
+    setData(prev=>({ ...prev, scores: { ...prev.scores, [sid]: { ...prev.scores[sid], [field]: parseFloat(val)||0 } } }));
   };
 
-  const saveAll = () => {
-    if(!docId) return;
-    // We send only the suffix part of the key if needed, or full logic in parent
-    // Parent expects suffix: `${selectedKelas}_${selectedMapel}`
-    onSaveNilai(`${selectedKelas}_${selectedMapel}`, currentData);
-    alert("Data Nilai Tersimpan!");
-  };
-
-  const filteredSiswa = siswa.filter(s => s.kelasId === selectedKelas);
-
-  // Helper to calc final grade row
-  const calculateRow = (scores, w) => {
-    if (!scores) return { avgUh: 0, final: 0 };
-    const uhKeys = ['uh1', 'uh2', 'uh3', 'uh4', 'uh5'];
-    let uhSum = 0;
-    let uhCount = 0;
-    uhKeys.forEach(k => {
-      if(scores[k] > 0) { uhSum += scores[k]; uhCount++; }
-    });
-    const avgUh = uhCount > 0 ? (uhSum / uhCount) : 0;
-    
-    // Final Formula
-    const pts = scores.pts || 0;
-    const pas = scores.pas || 0;
-    const totalW = w.uh + w.pts + w.pas;
-    const final = ((avgUh * w.uh) + (pts * w.pts) + (pas * w.pas)) / totalW;
-    
-    return { avgUh: avgUh.toFixed(1), final: final.toFixed(1) };
-  };
-
-  if(!kelas.length || !guru.length) return <div className="p-10 text-center">Mohon lengkapi Data Kelas dan Guru terlebih dahulu.</div>;
+  const filtered = siswa.filter(s=>s.kelasId===k);
 
   return (
-    <div className="space-y-6">
-       <div className="bg-white p-4 rounded shadow border flex flex-col md:flex-row gap-4 items-end">
-         <div className="flex-1">
-           <label className="font-bold text-sm">Pilih Kelas</label>
-           <select className="w-full border p-2 rounded" value={selectedKelas} onChange={e => setSelectedKelas(e.target.value)}>
-             <option value="">-- Pilih Kelas --</option>
-             {kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-           </select>
-         </div>
-         <div className="flex-1">
-           <label className="font-bold text-sm">Pilih Mapel (Guru)</label>
-           <select className="w-full border p-2 rounded" value={selectedMapel} onChange={e => setSelectedMapel(e.target.value)}>
-             <option value="">-- Pilih Mapel --</option>
-             {guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel} - {g.nama}</option>)}
-           </select>
-         </div>
-         <button onClick={saveAll} className="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 flex items-center gap-2">
-            <Save size={18}/> SIMPAN
-         </button>
-       </div>
-
-       {selectedKelas && selectedMapel && (
-         <div className="bg-white rounded shadow border overflow-hidden">
-            {/* CONFIG SECTION */}
-            <div className="p-4 bg-blue-50 grid md:grid-cols-4 gap-4 border-b">
-              <div>
-                 <label className="text-xs font-bold text-gray-600">KKTP (Passing Grade)</label>
-                 <input type="number" className="w-full border p-1 rounded" value={currentData.kktp} onChange={e => setCurrentData({...currentData, kktp: e.target.value})} />
-              </div>
-              <div>
-                 <label className="text-xs font-bold text-gray-600">Bobot Rerata UH</label>
-                 <input type="number" className="w-full border p-1 rounded" value={currentData.weights.uh} onChange={e => setCurrentData({...currentData, weights: {...currentData.weights, uh: parseFloat(e.target.value)}})} />
-              </div>
-              <div>
-                 <label className="text-xs font-bold text-gray-600">Bobot PTS</label>
-                 <input type="number" className="w-full border p-1 rounded" value={currentData.weights.pts} onChange={e => setCurrentData({...currentData, weights: {...currentData.weights, pts: parseFloat(e.target.value)}})} />
-              </div>
-              <div>
-                 <label className="text-xs font-bold text-gray-600">Bobot PAS</label>
-                 <input type="number" className="w-full border p-1 rounded" value={currentData.weights.pas} onChange={e => setCurrentData({...currentData, weights: {...currentData.weights, pas: parseFloat(e.target.value)}})} />
-              </div>
+    <div className="space-y-4">
+      <div className="bg-white p-4 rounded shadow flex gap-4 items-end">
+        <div className="flex-1"><label className="text-xs font-bold">Kelas</label><select className="w-full border p-2 rounded" value={k} onChange={e=>setK(e.target.value)}><option value="">Pilih</option>{kelas.map(c=><option key={c.id} value={c.id}>{c.nama}</option>)}</select></div>
+        <div className="flex-1"><label className="text-xs font-bold">Mapel</label><select className="w-full border p-2 rounded" value={m} onChange={e=>setM(e.target.value)}><option value="">Pilih</option>{guru.map(g=><option key={g.id} value={g.mapel}>{g.mapel}</option>)}</select></div>
+        <button onClick={()=>{if(docId){onSaveNilai(`${k}_${m}`,data);alert('Tersimpan')}}} className="bg-blue-600 text-white px-4 py-2 rounded">Simpan</button>
+      </div>
+      {k&&m && (
+        <div className="bg-white rounded shadow overflow-auto p-4">
+          <div className="mb-4 p-3 bg-gray-50 border rounded">
+            <h4 className="font-bold text-sm mb-2">Tujuan Pembelajaran (TP) untuk UH 1 - 5</h4>
+            <div className="grid grid-cols-2 gap-2">
+              {[0,1,2,3,4].map(i => (
+                <input key={i} className="border p-1 text-xs w-full rounded" placeholder={`Deskripsi TP UH ${i+1}`} value={data.tp[i]||''} onChange={e=>{const newTp = [...data.tp]; newTp[i]=e.target.value; setData({...data, tp:newTp});}}/>
+              ))}
             </div>
-
-            {/* TP INPUTS */}
-            <div className="p-4 border-b">
-              <h4 className="text-sm font-bold mb-2">Tujuan Pembelajaran (TP) untuk UH1 - UH5</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                 {[0,1,2,3,4].map(idx => (
-                    <input 
-                      key={idx}
-                      type="text" 
-                      placeholder={`TP ${idx+1}...`} 
-                      className="border p-1 text-xs rounded w-full"
-                      value={currentData.tp[idx] || ''}
-                      onChange={(e) => {
-                         const newTp = [...currentData.tp];
-                         newTp[idx] = e.target.value;
-                         setCurrentData({...currentData, tp: newTp});
-                      }}
-                    />
-                 ))}
-              </div>
-            </div>
-
-            {/* GRADES TABLE */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs md:text-sm text-left">
-                <thead className="bg-gray-100 text-gray-700 font-bold uppercase">
-                  <tr>
-                    <th className="p-3 border sticky left-0 bg-gray-100 min-w-[150px]">Nama Siswa</th>
-                    <th className="p-2 border text-center w-16">UH1</th>
-                    <th className="p-2 border text-center w-16">UH2</th>
-                    <th className="p-2 border text-center w-16">UH3</th>
-                    <th className="p-2 border text-center w-16">UH4</th>
-                    <th className="p-2 border text-center w-16">UH5</th>
-                    <th className="p-2 border text-center bg-blue-50 w-16">Rerata</th>
-                    <th className="p-2 border text-center bg-yellow-50 w-16">PTS</th>
-                    <th className="p-2 border text-center bg-green-50 w-16">PAS</th>
-                    <th className="p-2 border text-center bg-gray-200 w-16">Akhir</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSiswa.map(s => {
-                    const sc = currentData.scores[s.id] || {};
-                    const { avgUh, final } = calculateRow(sc, currentData.weights);
-                    return (
-                      <tr key={s.id} className="border-b hover:bg-gray-50">
-                        <td className="p-2 border sticky left-0 bg-white font-medium">{s.nama}</td>
-                        {['uh1','uh2','uh3','uh4','uh5'].map(k => (
-                          <td key={k} className="p-1 border text-center">
-                            <input 
-                              type="number" 
-                              className="w-full text-center outline-none bg-transparent" 
-                              placeholder="-"
-                              value={sc[k] || ''}
-                              onChange={e => handleScoreChange(s.id, k, e.target.value)}
-                            />
-                          </td>
-                        ))}
-                        <td className="p-2 border text-center bg-blue-50 font-bold text-gray-600">{avgUh}</td>
-                        <td className="p-1 border text-center bg-yellow-50">
-                           <input type="number" className="w-full text-center bg-transparent font-semibold" value={sc.pts || ''} onChange={e => handleScoreChange(s.id, 'pts', e.target.value)}/>
-                        </td>
-                        <td className="p-1 border text-center bg-green-50">
-                           <input type="number" className="w-full text-center bg-transparent font-semibold" value={sc.pas || ''} onChange={e => handleScoreChange(s.id, 'pas', e.target.value)}/>
-                        </td>
-                        <td className={`p-2 border text-center font-bold ${final < currentData.kktp ? 'text-red-600' : 'text-blue-600'} bg-gray-100`}>
-                          {final}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-         </div>
-       )}
-    </div>
-  )
-}
-
-// 5. ANALISIS
-function Analisis({ siswa, kelas, guru, docPrefix, nilaiData, onSaveNilai }) {
-  const [selectedKelas, setSelectedKelas] = useState('');
-  const [selectedMapel, setSelectedMapel] = useState('');
-  const [selectedUH, setSelectedUH] = useState('uh1');
-  
-  const docId = selectedKelas && selectedMapel ? `${docPrefix}_${selectedKelas}_${selectedMapel}` : null;
-  const currentData = nilaiData[docId] || null;
-  
-  const filteredSiswa = siswa.filter(s => s.kelasId === selectedKelas);
-
-  // Remedial Logic Helper
-  const handleRemidiChange = (studentId, val) => {
-    // We store remedial data nested in a separate 'analysis' object inside the main doc or simpler: separate field
-    // For simplicity: `remedial_uh1_studentId` in `scores`
-    const field = `remedial_${selectedUH}`;
-    const newScores = {
-      ...currentData.scores,
-      [studentId]: {
-        ...currentData.scores[studentId],
-        [field]: parseFloat(val)
-      }
-    };
-    onSaveNilai(`${selectedKelas}_${selectedMapel}`, { ...currentData, scores: newScores });
-  };
-  
-  const handleCatatanChange = (studentId, val) => {
-      const field = `note_${selectedUH}`;
-      const newScores = {
-        ...currentData.scores,
-        [studentId]: {
-          ...currentData.scores[studentId],
-          [field]: val
-        }
-      };
-      onSaveNilai(`${selectedKelas}_${selectedMapel}`, { ...currentData, scores: newScores });
-  }
-
-  if (!selectedKelas || !selectedMapel || !currentData) {
-     return (
-       <div className="space-y-4">
-          <div className="bg-white p-4 rounded shadow border">
-            <h2 className="text-xl font-bold mb-4">Analisis Hasil Belajar</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <select className="border p-2 rounded" value={selectedKelas} onChange={e => setSelectedKelas(e.target.value)}>
-                <option value="">-- Pilih Kelas --</option>
-                {kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-              </select>
-              <select className="border p-2 rounded" value={selectedMapel} onChange={e => setSelectedMapel(e.target.value)}>
-                <option value="">-- Pilih Mapel --</option>
-                {guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel}</option>)}
-              </select>
-            </div>
-            {!currentData && selectedKelas && selectedMapel && <p className="mt-4 text-red-500">Belum ada data nilai untuk kelas/mapel ini. Silahkan input di menu Penilaian.</p>}
           </div>
-       </div>
-     );
-  }
-
-  // Determine UH Index for TP
-  const uhIndex = parseInt(selectedUH.replace('uh', '')) - 1;
-  const tpText = currentData.tp[uhIndex] || '(TP Belum diisi)';
-  const kktp = currentData.kktp || 75;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center bg-white p-4 rounded shadow">
-        <div>
-           <h2 className="text-lg font-bold">Analisis Penilaian</h2>
-           <p className="text-sm text-gray-500">{kelas.find(k=>k.id===selectedKelas)?.nama} | {selectedMapel}</p>
+          <div className="grid grid-cols-4 gap-4 mb-4 text-xs">
+             <div><label>KKTP</label><input type="number" className="border w-full p-1" value={data.kktp} onChange={e=>setData({...data,kktp:e.target.value})}/></div>
+             <div><label>Bobot UH</label><input type="number" className="border w-full p-1" value={data.weights.uh} onChange={e=>setData({...data,weights:{...data.weights,uh:parseFloat(e.target.value)}})}/></div>
+             <div><label>Bobot PTS</label><input type="number" className="border w-full p-1" value={data.weights.pts} onChange={e=>setData({...data,weights:{...data.weights,pts:parseFloat(e.target.value)}})}/></div>
+             <div><label>Bobot PAS</label><input type="number" className="border w-full p-1" value={data.weights.pas} onChange={e=>setData({...data,weights:{...data.weights,pas:parseFloat(e.target.value)}})}/></div>
+          </div>
+          <table className="w-full text-xs text-center border-collapse border">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="border p-2 text-left">Nama</th>
+                {[1,2,3,4,5].map(i=><th key={i} className="border p-1 w-12">UH{i}</th>)}
+                <th className="border p-1 w-12 bg-yellow-50">PTS</th>
+                <th className="border p-1 w-12 bg-green-50">PAS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s=>(
+                <tr key={s.id}>
+                  <td className="border p-2 text-left font-medium">{s.nama}</td>
+                  {[1,2,3,4,5].map(i=><td key={i} className="border p-1"><input type="number" className="w-full text-center" value={data.scores[s.id]?.[`uh${i}`]||''} onChange={e=>handleChange(s.id,`uh${i}`,e.target.value)}/></td>)}
+                  <td className="border p-1 bg-yellow-50"><input type="number" className="w-full text-center bg-transparent" value={data.scores[s.id]?.pts||''} onChange={e=>handleChange(s.id,'pts',e.target.value)}/></td>
+                  <td className="border p-1 bg-green-50"><input type="number" className="w-full text-center bg-transparent" value={data.scores[s.id]?.pas||''} onChange={e=>handleChange(s.id,'pas',e.target.value)}/></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <div className="flex items-center gap-2">
-           <label className="font-semibold text-sm">Pilih Penilaian:</label>
-           <select value={selectedUH} onChange={e => setSelectedUH(e.target.value)} className="border p-1 rounded">
-             <option value="uh1">UH 1</option>
-             <option value="uh2">UH 2</option>
-             <option value="uh3">UH 3</option>
-             <option value="uh4">UH 4</option>
-             <option value="uh5">UH 5</option>
-           </select>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded shadow border">
-         <div className="mb-4 bg-blue-50 p-3 rounded text-sm text-blue-800 border border-blue-200">
-            <strong>Tujuan Pembelajaran:</strong> {tpText} <br/>
-            <strong>KKTP:</strong> {kktp}
-         </div>
-
-         <table className="w-full text-sm text-left border">
-           <thead className="bg-gray-100 font-bold text-gray-700">
-             <tr>
-               <th className="p-3 border">Nama Siswa</th>
-               <th className="p-3 border w-24 text-center">Nilai Murni</th>
-               <th className="p-3 border text-center">Ketuntasan</th>
-               <th className="p-3 border text-center">Tindak Lanjut</th>
-               <th className="p-3 border w-24 text-center">Nilai Perbaikan</th>
-               <th className="p-3 border">Catatan</th>
-             </tr>
-           </thead>
-           <tbody>
-             {filteredSiswa.map(s => {
-               const sc = currentData.scores[s.id] || {};
-               const val = sc[selectedUH] || 0;
-               const isTuntas = val >= kktp;
-               const remidiVal = sc[`remedial_${selectedUH}`] || '';
-               const note = sc[`note_${selectedUH}`] || '';
-
-               return (
-                 <tr key={s.id} className="border-b hover:bg-gray-50">
-                   <td className="p-2 border font-medium">{s.nama}</td>
-                   <td className={`p-2 border text-center font-bold ${isTuntas ? 'text-blue-600':'text-red-500'}`}>{val}</td>
-                   <td className="p-2 border text-center">
-                     {isTuntas ? <span className="text-green-600 bg-green-100 px-2 py-0.5 rounded text-xs">Tuntas</span> : <span className="text-red-600 bg-red-100 px-2 py-0.5 rounded text-xs">Belum Tuntas</span>}
-                   </td>
-                   <td className="p-2 border text-center text-xs text-gray-600">
-                     {isTuntas ? 'Pengayaan' : 'Remedial'}
-                   </td>
-                   <td className="p-2 border">
-                     {!isTuntas && (
-                       <input 
-                         type="number" 
-                         className="w-full text-center border rounded p-1" 
-                         placeholder="Nilai" 
-                         value={remidiVal} 
-                         onChange={e => handleRemidiChange(s.id, e.target.value)}
-                         onBlur={() => onSaveNilai(`${selectedKelas}_${selectedMapel}`, currentData)} // Save on blur
-                       />
-                     )}
-                   </td>
-                   <td className="p-2 border">
-                      <input 
-                         type="text" 
-                         className="w-full text-xs border-b outline-none focus:border-blue-500" 
-                         placeholder="Catatan..." 
-                         value={note}
-                         onChange={e => handleCatatanChange(s.id, e.target.value)}
-                         onBlur={() => onSaveNilai(`${selectedKelas}_${selectedMapel}`, currentData)}
-                      />
-                   </td>
-                 </tr>
-               )
-             })}
-           </tbody>
-         </table>
-      </div>
+      )}
     </div>
   )
 }
 
-// 6. LAPORAN (REPORTING)
-function Laporan({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, sem }) {
-  const [view, setView] = useState('menu'); // menu, legger, uh, analisis
-  const [config, setConfig] = useState({ kelasId: '', mapel: '', uh: 'uh1' });
+function Analisis({ siswa, kelas, guru, docPrefix, nilaiData, onSaveNilai }) {
+  const [k, setK] = useState(''); const [m, setM] = useState(''); const [uh, setUh] = useState('uh1');
+  const docId = k&&m ? `${docPrefix}_${k}_${m}` : null;
+  const data = (docId && nilaiData[docId]) ? nilaiData[docId] : null;
+  const filtered = siswa.filter(s=>s.kelasId===k);
 
-  const handlePrint = () => {
-    window.print();
+  const handleUpdate = (sid, field, val) => {
+    const newData = { ...data, scores: { ...data.scores, [sid]: { ...data.scores[sid], [field]: val } } };
+    onSaveNilai(`${k}_${m}`, newData);
   };
 
+  return (
+    <div className="space-y-4">
+      <div className="bg-white p-4 rounded shadow flex gap-4 items-center">
+        <select className="border p-1 rounded" value={k} onChange={e=>setK(e.target.value)}><option value="">Kelas</option>{kelas.map(c=><option key={c.id} value={c.id}>{c.nama}</option>)}</select>
+        <select className="border p-1 rounded" value={m} onChange={e=>setM(e.target.value)}><option value="">Mapel</option>{guru.map(g=><option key={g.id} value={g.mapel}>{g.mapel}</option>)}</select>
+        <select className="border p-1 rounded" value={uh} onChange={e=>setUh(e.target.value)}>{[1,2,3,4,5].map(i=><option key={i} value={`uh${i}`}>UH {i}</option>)}</select>
+      </div>
+      {data && (
+        <div className="bg-white p-4 rounded shadow">
+          <div className="mb-4 text-sm bg-blue-50 p-2 border">
+            <strong>Target Pembelajaran ({uh.toUpperCase()}):</strong> {data.tp[parseInt(uh.slice(2))-1] || '-'} <br/>
+            <strong>KKTP:</strong> {data.kktp}
+          </div>
+          <table className="w-full text-sm border text-left">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="p-2 border">Nama</th>
+                <th className="p-2 border text-center">Nilai</th>
+                <th className="p-2 border text-center">Status</th>
+                <th className="p-2 border text-center">Perbaikan</th>
+                <th className="p-2 border text-center">Catatan Guru</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s=>{
+                const v = data.scores[s.id]?.[uh]||0;
+                const tuntas = v >= data.kktp;
+                return (
+                  <tr key={s.id} className="border-b">
+                    <td className="p-2 border">{s.nama}</td>
+                    <td className={`p-2 border text-center font-bold ${tuntas?'text-blue-600':'text-red-500'}`}>{v}</td>
+                    <td className="p-2 border text-center">{tuntas?'Tuntas':'Belum'}</td>
+                    <td className="p-2 border"><input type="number" placeholder="Nilai Remidi/Pengayaan" className="w-full text-center border bg-gray-50" value={data.scores[s.id]?.[`remedial_${uh}`]||''} onChange={e=>handleUpdate(s.id,`remedial_${uh}`,parseFloat(e.target.value)||0)}/></td>
+                    <td className="p-2 border"><input type="text" placeholder="Catatan..." className="w-full text-xs border-b outline-none" value={data.scores[s.id]?.[`note_${uh}`]||''} onChange={e=>handleUpdate(s.id,`note_${uh}`,e.target.value)}/></td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --- KOMPONEN NILAI AKHIR (DIPERTAHANKAN) ---
+function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, sem }) {
+  const [config, setConfig] = useState({ kelasId: '', mapel: '' });
+  
+  const handlePrint = () => window.print();
   const selectedKelasData = kelas.find(k => k.id === config.kelasId);
-  const selectedGuru = guru.find(g => g.mapel === config.mapel);
   const docId = config.kelasId && config.mapel ? `${docPrefix}_${config.kelasId}_${config.mapel}` : null;
   const currentData = nilaiData[docId] || null;
   const filteredSiswa = siswa.filter(s => s.kelasId === config.kelasId);
 
-  // Header Helper for Print
-  const ReportHeader = ({ title }) => (
-    <div className="text-center border-b-2 border-black pb-4 mb-6 hidden print:block">
-      <div className="flex items-center justify-center gap-4 mb-2">
-         {identitas.logoUrl && <img src={identitas.logoUrl} alt="Logo" className="h-16 w-16 object-contain"/>}
-         <div>
-            <h1 className="text-xl font-bold uppercase">{identitas.namaSekolah || 'NAMA SEKOLAH'}</h1>
-            <p className="text-sm">{identitas.alamat}</p>
+  const getEffectiveScore = (scores, uhKey) => {
+    if (!scores) return 0;
+    const original = parseFloat(scores[uhKey] || 0);
+    const remedial = scores[`remedial_${uhKey}`];
+    return (remedial !== undefined && remedial !== '' && !isNaN(remedial)) ? parseFloat(remedial) : original;
+  };
+
+  // FORMAT TANGGAL INDONESIA (02 Desember 2025)
+  const today = new Date().toLocaleDateString('id-ID', {
+    day: '2-digit', 
+    month: 'long', 
+    year: 'numeric'
+  });
+
+  return (
+    <div className="bg-white min-h-screen p-8 animate-in fade-in">
+      <div className="print:hidden flex justify-between mb-4 sticky top-0 bg-white/90 backdrop-blur p-2 border-b z-10 items-center">
+         <div className="flex gap-2">
+            <select className="border border-gray-300 p-2 rounded" value={config.kelasId} onChange={e => setConfig({...config, kelasId: e.target.value})}>
+              <option value="">-- Pilih Kelas --</option>
+              {kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
+            </select>
+            <select className="border border-gray-300 p-2 rounded" value={config.mapel} onChange={e => setConfig({...config, mapel: e.target.value})}>
+              <option value="">-- Pilih Mapel --</option>
+              {guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel}</option>)}
+            </select>
          </div>
+         <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 shadow-lg"><Printer size={16}/> Cetak</button>
       </div>
-      <h2 className="font-bold text-lg mt-2 uppercase">{title}</h2>
-      <div className="flex justify-between text-sm mt-2 px-10 font-semibold">
-        <span>Tahun Pelajaran: {tp}</span>
-        <span>Semester: {sem}</span>
-      </div>
-    </div>
-  );
 
-  const ReportFooter = () => (
-    <div className="hidden print:flex justify-between mt-10 px-8 text-sm break-inside-avoid">
-       <div className="text-center">
-          <p>Mengetahui,</p>
-          <p>Kepala Sekolah</p>
-          <br/><br/><br/>
-          <p className="font-bold underline">{identitas.kepsek}</p>
-          <p>NIP. {identitas.nipKepsek}</p>
-       </div>
-       <div className="text-center">
-          <p>{identitas.kotaCetak || 'Kota'}, {identitas.tglCetak || '........'}</p>
-          <p>Guru Mata Pelajaran</p>
-          <br/><br/><br/>
-          <p className="font-bold underline">{selectedGuru?.nama || '................'}</p>
-          <p>NIP. {selectedGuru?.nip || '................'}</p>
-       </div>
-    </div>
-  );
-
-  if (view === 'menu') {
-    return (
-      <div className="max-w-2xl mx-auto bg-white p-8 rounded shadow border space-y-6">
-        <h2 className="text-2xl font-bold text-center">Pusat Cetak Laporan</h2>
-        <div className="grid gap-4">
-           <div>
-             <label className="font-bold">Pilih Kelas</label>
-             <select className="w-full border p-2 rounded" value={config.kelasId} onChange={e => setConfig({...config, kelasId: e.target.value})}>
-               <option value="">Pilih...</option>
-               {kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-             </select>
-           </div>
-           <div>
-             <label className="font-bold">Pilih Mapel</label>
-             <select className="w-full border p-2 rounded" value={config.mapel} onChange={e => setConfig({...config, mapel: e.target.value})}>
-               <option value="">Pilih...</option>
-               {guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel}</option>)}
-             </select>
-           </div>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-           <button onClick={() => setView('legger')} className="p-4 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 flex flex-col items-center">
-             <FileText size={32} className="text-blue-600 mb-2"/>
-             <span className="font-bold">Rekap / Legger Nilai</span>
-           </button>
-           <button onClick={() => setView('analisis')} className="p-4 bg-purple-50 border border-purple-200 rounded hover:bg-purple-100 flex flex-col items-center">
-             <BarChart2 size={32} className="text-purple-600 mb-2"/>
-             <span className="font-bold">Analisis Nilai (UH)</span>
-           </button>
-           <button onClick={() => setView('daftar')} className="p-4 bg-green-50 border border-green-200 rounded hover:bg-green-100 flex flex-col items-center">
-             <Users size={32} className="text-green-600 mb-2"/>
-             <span className="font-bold">Daftar Nilai</span>
-           </button>
-        </div>
-      </div>
-    )
-  }
-
-  // --- REPORT VIEWS ---
-  
-  // LEGGER
-  if (view === 'legger') {
-     return (
-       <div className="bg-white min-h-screen p-8">
-         <div className="print:hidden flex justify-between mb-4">
-            <button onClick={() => setView('menu')} className="text-gray-500">Kembali</button>
-            <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2"><Printer size={16}/> Cetak</button>
-         </div>
-         
-         <ReportHeader title={`LEGER NILAI - KELAS ${selectedKelasData?.nama || ''} - ${config.mapel}`} />
-         
-         <table className="w-full border-collapse border border-black text-sm">
-           <thead>
-             <tr className="bg-gray-100">
-               <th className="border border-black p-2 w-10">No</th>
-               <th className="border border-black p-2">Nama Siswa</th>
-               <th className="border border-black p-2 w-12">UH1</th>
-               <th className="border border-black p-2 w-12">UH2</th>
-               <th className="border border-black p-2 w-12">UH3</th>
-               <th className="border border-black p-2 w-12">UH4</th>
-               <th className="border border-black p-2 w-12">UH5</th>
-               <th className="border border-black p-2 w-12 bg-gray-50">Rata</th>
-               <th className="border border-black p-2 w-12">PTS</th>
-               <th className="border border-black p-2 w-12">PAS</th>
-               <th className="border border-black p-2 w-16 bg-gray-200">Akhir</th>
-             </tr>
-           </thead>
-           <tbody>
-             {filteredSiswa.map((s, idx) => {
-               const sc = currentData?.scores?.[s.id] || {};
-               // Calc logic repeated (ideally util func)
-               let sum=0, count=0;
-               ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{if(sc[k]>0){sum+=sc[k];count++}});
-               const avg = count ? (sum/count).toFixed(0) : '';
-               const w = currentData?.weights || {uh:2, pts:1, pas:1};
-               const final = avg ? ((parseFloat(avg)*w.uh + (sc.pts||0)*w.pts + (sc.pas||0)*w.pas)/(w.uh+w.pts+w.pas)).toFixed(0) : '';
-
-               return (
-                 <tr key={s.id}>
-                   <td className="border border-black p-1 text-center">{idx+1}</td>
-                   <td className="border border-black p-1">{s.nama}</td>
-                   <td className="border border-black p-1 text-center">{sc.uh1||'-'}</td>
-                   <td className="border border-black p-1 text-center">{sc.uh2||'-'}</td>
-                   <td className="border border-black p-1 text-center">{sc.uh3||'-'}</td>
-                   <td className="border border-black p-1 text-center">{sc.uh4||'-'}</td>
-                   <td className="border border-black p-1 text-center">{sc.uh5||'-'}</td>
-                   <td className="border border-black p-1 text-center font-bold bg-gray-50">{avg}</td>
-                   <td className="border border-black p-1 text-center">{sc.pts||'-'}</td>
-                   <td className="border border-black p-1 text-center">{sc.pas||'-'}</td>
-                   <td className="border border-black p-1 text-center font-bold bg-gray-200">{final}</td>
-                 </tr>
-               )
-             })}
-           </tbody>
-         </table>
-         <ReportFooter />
-       </div>
-     )
-  }
-
-  // ANALISIS
-  if (view === 'analisis') {
-    return (
-      <div className="bg-white min-h-screen p-8">
-        <div className="print:hidden flex justify-between mb-4 items-center">
-           <button onClick={() => setView('menu')} className="text-gray-500">Kembali</button>
-           <select className="border p-2 rounded" value={config.uh} onChange={e=>setConfig({...config, uh: e.target.value})}>
-              <option value="uh1">UH 1</option>
-              <option value="uh2">UH 2</option>
-              <option value="uh3">UH 3</option>
-              <option value="uh4">UH 4</option>
-              <option value="uh5">UH 5</option>
-           </select>
-           <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2"><Printer size={16}/> Cetak</button>
-        </div>
-
-        <ReportHeader title={`ANALISIS HASIL PENILAIAN (${config.uh.toUpperCase()})`} />
-        
-        <div className="mb-4 text-sm border p-2">
-           <p><strong>Kelas:</strong> {selectedKelasData?.nama} | <strong>Mapel:</strong> {config.mapel}</p>
-           <p><strong>Tujuan Pembelajaran:</strong> {currentData?.tp?.[parseInt(config.uh.replace('uh',''))-1] || '-'}</p>
-           <p><strong>KKTP:</strong> {currentData?.kktp || 75}</p>
-        </div>
-
-        <table className="w-full border-collapse border border-black text-sm">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="border border-black p-2 w-10">No</th>
-              <th className="border border-black p-2">Nama Siswa</th>
-              <th className="border border-black p-2 w-20">Nilai</th>
-              <th className="border border-black p-2 w-24">Ketuntasan</th>
-              <th className="border border-black p-2">Tindak Lanjut</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSiswa.map((s, idx) => {
-              const val = currentData?.scores?.[s.id]?.[config.uh] || 0;
-              const tuntas = val >= (currentData?.kktp || 75);
-              return (
-                <tr key={s.id}>
-                  <td className="border border-black p-1 text-center">{idx+1}</td>
-                  <td className="border border-black p-1">{s.nama}</td>
-                  <td className="border border-black p-1 text-center">{val}</td>
-                  <td className="border border-black p-1 text-center">{tuntas ? 'Tuntas' : 'Belum'}</td>
-                  <td className="border border-black p-1">{tuntas ? 'Pengayaan' : 'Remedial'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-        
-        <div className="mt-6 text-sm grid grid-cols-2 gap-8 break-inside-avoid">
-           <div className="border p-4">
-              <strong>Hasil Analisis:</strong>
-              <ul className="list-disc ml-5 mt-2">
-                 <li>Jumlah Siswa: {filteredSiswa.length}</li>
-                 <li>Tuntas: {filteredSiswa.filter(s => (currentData?.scores?.[s.id]?.[config.uh] || 0) >= (currentData?.kktp||75)).length}</li>
-                 <li>Belum Tuntas: {filteredSiswa.filter(s => (currentData?.scores?.[s.id]?.[config.uh] || 0) < (currentData?.kktp||75)).length}</li>
-              </ul>
-           </div>
-        </div>
-
-        <ReportFooter />
-      </div>
-    )
-  }
-
-  // DAFTAR NILAI (Simple)
-  if (view === 'daftar') {
-      return (
-          <div className="bg-white min-h-screen p-8">
-            <div className="print:hidden flex justify-between mb-4">
-                <button onClick={() => setView('menu')} className="text-gray-500">Kembali</button>
-                <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2"><Printer size={16}/> Cetak</button>
+      {config.kelasId && config.mapel && currentData ? (
+        <>
+          <div className="text-center border-b-2 border-black pb-4 mb-6 hidden print:block">
+            <div className="flex items-center justify-center gap-4 mb-2">
+               {identitas.logoUrl && <img src={identitas.logoUrl} alt="Logo" className="h-24 w-24 object-contain"/>}
+               <div>
+                  <h1 className="text-2xl font-bold uppercase">{identitas.namaSekolah}</h1>
+                  <p className="text-sm">{identitas.alamat}</p>
+               </div>
             </div>
-            
-            <ReportHeader title={`DAFTAR NILAI - ${config.mapel}`} />
-            
-            <table className="w-full border-collapse border border-black text-sm">
-                <thead>
-                    <tr className="bg-gray-100">
-                        <th className="border border-black p-2 w-10">No</th>
-                        <th className="border border-black p-2">Nama Siswa</th>
-                        <th className="border border-black p-2 text-center">L/P</th>
-                        <th className="border border-black p-2 w-32">Nilai Akhir</th>
-                        <th className="border border-black p-2">Keterangan</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {filteredSiswa.map((s, idx) => {
-                         const sc = currentData?.scores?.[s.id] || {};
-                         // Calc
-                         let sum=0, count=0;
-                         ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{if(sc[k]>0){sum+=sc[k];count++}});
-                         const avg = count ? (sum/count) : 0;
-                         const w = currentData?.weights || {uh:2, pts:1, pas:1};
-                         const final = avg ? ((avg*w.uh + (sc.pts||0)*w.pts + (sc.pas||0)*w.pas)/(w.uh+w.pts+w.pas)).toFixed(0) : 0;
-                         const tuntas = final >= (currentData?.kktp || 75);
-
-                        return (
-                            <tr key={s.id}>
-                                <td className="border border-black p-1 text-center">{idx+1}</td>
-                                <td className="border border-black p-1">{s.nama}</td>
-                                <td className="border border-black p-1 text-center">{s.gender}</td>
-                                <td className="border border-black p-1 text-center font-bold">{final > 0 ? final : '-'}</td>
-                                <td className="border border-black p-1">{final > 0 ? (tuntas ? 'Lulus KKTP' : 'Perlu Bimbingan') : '-'}</td>
-                            </tr>
-                        )
-                    })}
-                </tbody>
-            </table>
-            <ReportFooter />
+            <h2 className="font-bold text-lg mt-2 uppercase">LAPORAN NILAI AKHIR (FIX)</h2>
+            <div className="flex justify-between text-sm mt-4 px-10 font-semibold border-t border-dashed pt-2">
+              <span>Mapel: {config.mapel}</span>
+              <span>Kelas: {selectedKelasData?.nama}</span>
+              <span>Tahun Pelajaran: {tp} ({sem})</span>
+            </div>
           </div>
-      )
-  }
 
-  return <div>Loading...</div>;
+          <table className="w-full border-collapse border border-black text-xs md:text-sm">
+            <thead>
+              <tr className="bg-gray-200">
+                <th rowSpan="2" className="border border-black p-2 w-8">No</th>
+                <th rowSpan="2" className="border border-black p-2 text-left">Nama Siswa</th>
+                <th colSpan="5" className="border border-black p-1">Nilai Ulangan Harian (Efektif)</th>
+                <th rowSpan="2" className="border border-black p-2 w-12 bg-blue-50">Rata UH</th>
+                <th rowSpan="2" className="border border-black p-2 w-12 bg-yellow-50">PTS</th>
+                <th rowSpan="2" className="border border-black p-2 w-12 bg-green-50">PAS</th>
+                <th rowSpan="2" className="border border-black p-2 w-16 bg-gray-300">Nilai Akhir</th>
+                <th rowSpan="2" className="border border-black p-2 w-24">Keterangan</th>
+              </tr>
+              <tr className="bg-gray-100">
+                {[1,2,3,4,5].map(i=><th key={i} className="border border-black p-1 w-10">UH{i}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSiswa.map((s, idx) => {
+                const sc = currentData.scores[s.id] || {};
+                const effUH1 = getEffectiveScore(sc, 'uh1');
+                const effUH2 = getEffectiveScore(sc, 'uh2');
+                const effUH3 = getEffectiveScore(sc, 'uh3');
+                const effUH4 = getEffectiveScore(sc, 'uh4');
+                const effUH5 = getEffectiveScore(sc, 'uh5');
+
+                let sum = 0, count = 0;
+                [effUH1, effUH2, effUH3, effUH4, effUH5].forEach(v => { if(v > 0) { sum += v; count++; } });
+                const avgUH = count > 0 ? (sum / count) : 0;
+
+                const w = currentData.weights;
+                const totalW = w.uh + w.pts + w.pas;
+                const pts = sc.pts || 0;
+                const pas = sc.pas || 0;
+                const final = totalW > 0 ? ((avgUH * w.uh) + (pts * w.pts) + (pas * w.pas)) / totalW : 0;
+                const ket = final >= currentData.kktp ? "Tuntas" : "Belum Tuntas";
+
+                return (
+                  <tr key={s.id}>
+                    <td className="border border-black p-1 text-center">{idx+1}</td>
+                    <td className="border border-black p-1 pl-2 font-medium">{s.nama}</td>
+                    <td className="border border-black p-1 text-center">{effUH1 || '-'}</td>
+                    <td className="border border-black p-1 text-center">{effUH2 || '-'}</td>
+                    <td className="border border-black p-1 text-center">{effUH3 || '-'}</td>
+                    <td className="border border-black p-1 text-center">{effUH4 || '-'}</td>
+                    <td className="border border-black p-1 text-center">{effUH5 || '-'}</td>
+                    <td className="border border-black p-1 text-center font-bold bg-blue-50">{avgUH.toFixed(0)}</td>
+                    <td className="border border-black p-1 text-center bg-yellow-50">{pts || '-'}</td>
+                    <td className="border border-black p-1 text-center bg-green-50">{pas || '-'}</td>
+                    <td className="border border-black p-1 text-center font-bold bg-gray-200 text-blue-900">{final.toFixed(0)}</td>
+                    <td className={`border border-black p-1 text-center text-xs ${final >= currentData.kktp ? 'text-green-700 font-bold' : 'text-red-600'}`}>{final > 0 ? ket : '-'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          
+          <div className="hidden print:flex justify-between mt-10 px-8 text-sm break-inside-avoid">
+             <div className="text-center"><p>Mengetahui,</p><p>Kepala Sekolah</p><br/><br/><br/><p className="font-bold underline">{identitas.kepsek}</p><p>NIP. {identitas.nipKepsek}</p></div>
+             <div className="text-center"><p>{identitas.kotaCetak}, {today}</p><p>Guru Mata Pelajaran</p><br/><br/><br/><p className="font-bold underline">.........................</p><p>NIP. .........................</p></div>
+          </div>
+        </>
+      ) : (
+        <div className="text-center p-10 text-gray-500 border-2 border-dashed rounded">Silakan pilih Kelas dan Mapel, atau pastikan data nilai sudah diinput.</div>
+      )}
+    </div>
+  );
 }
 
-// --- UTILS ---
 const InputGroup = ({ label, value, onChange, type="text" }) => (
   <div className="w-full">
     <label className="text-sm font-medium text-gray-700 mb-1 block">{label}</label>
-    <input 
-      type={type} 
-      className="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" 
-      value={value || ''} 
-      onChange={(e) => onChange(e.target.value)}
-    />
+    <input type={type} className="w-full border border-gray-300 rounded p-2 focus:outline-none" value={value || ''} onChange={(e) => onChange(e.target.value)} />
   </div>
 );

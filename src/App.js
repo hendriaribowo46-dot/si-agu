@@ -398,6 +398,7 @@ function Pengaturan({ identitas, guru, onSaveIdentitas, onSaveGuru }) {
     }
   };
 
+function ConfigErrorScreen({ error }) {
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div className="bg-white p-6 rounded shadow">
@@ -481,6 +482,7 @@ function DataSiswa({ siswa, kelas, onSave, onDelete }) {
 
   const filtered = filter ? siswa.filter(s=>s.kelasId===filter) : siswa;
 
+function MenuItem({ icon, label, active, onClick }) {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex justify-between border-b pb-2">
@@ -836,7 +838,7 @@ function LaporanLengkap({ identitas, siswa, kelas, guru, docPrefix, nilaiData, t
       <div className="text-center">
         <h2 className="font-bold text-lg uppercase underline">{title}</h2>
         <div className="flex justify-between text-sm mt-2 px-4 font-semibold">
-          <span>Mapel: {config.mapel}</span>
+          <span>Mata Pelajaran: {config.mapel}</span>
           <span>Kelas: {selectedKelasData?.nama}</span>
           <span>Tahun Pelajaran: {tp} ({sem})</span>
         </div>

@@ -3,7 +3,7 @@ import {
   Save, Users, School, BookOpen, FileText, 
   Settings, Printer, Plus, Trash2, Edit, 
   ChevronRight, BarChart2, Upload, Download, Check,
-  LogOut, Lock, Mail, AlertTriangle, GraduationCap, FileSpreadsheet, Image as ImageIcon
+  LogOut, Lock, Mail, AlertTriangle, GraduationCap, FileSpreadsheet, Image as ImageIcon, Layout
 } from 'lucide-react';
 
 // Firebase Imports
@@ -36,7 +36,7 @@ const firebaseConfig = {
   projectId: "gurupro-app",
   storageBucket: "gurupro-app.firebasestorage.app",
   messagingSenderId: "411502537546",
-  appId: "1:411502537546:web:7135e7322ca2e933b5efb3"
+  appId: "1:411502537546:web:7135e7322ca2e933b5efb3",
 };
 
 // Inisialisasi Firebase Aman
@@ -58,6 +58,31 @@ try {
 }
 
 const appId = 'e-spn-sekolah';
+
+// --- UTILS (DEFINED ONCE) ---
+const InputGroup = ({ label, value, onChange, type="text" }) => (
+  <div className="w-full">
+    <label className="text-sm font-medium text-gray-700 mb-1 block">{label}</label>
+    <input type={type} className="w-full border border-gray-300 rounded p-2 focus:outline-none" value={value || ''} onChange={(e) => onChange(e.target.value)} />
+  </div>
+);
+
+const exportTableToExcel = (tableId, filename = 'Laporan.xls') => {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const html = table.outerHTML;
+  const blob = new Blob([`
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:x='urn:schemas-microsoft-com:office:excel' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head><meta charset='utf-8'></head><body>${html}</body></html>
+  `], { type: 'application/vnd.ms-excel' });
+  
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
 
 // --- MAIN APP COMPONENT ---
 export default function App() {
@@ -164,9 +189,10 @@ export default function App() {
   return (
     <div className="flex h-screen bg-gray-100 font-sans text-gray-800 overflow-hidden print:overflow-visible print:h-auto print:block">
       {/* CSS KHUSUS CETAK UNTUK MENGATASI PREVIEW KOSONG */}
+      {/* Saya menghapus size: landscape global agar bisa diatur dinamis */}
       <style>{`
         @media print {
-          @page { margin: 1cm; size: landscape; }
+          @page { margin: 1cm; }
           body, #root, main { 
             height: auto !important; 
             overflow: visible !important; 
@@ -176,10 +202,8 @@ export default function App() {
           aside, .print\\:hidden, nav, button { 
             display: none !important; 
           }
-          /* Pastikan tabel tidak terpotong */
           table { page-break-inside: auto; width: 100% !important; }
           tr { page-break-inside: avoid; page-break-after: auto; }
-          /* Reset warna text agar hitam pekat */
           * { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
         }
       `}</style>
@@ -302,269 +326,6 @@ export default function App() {
 
 // --- SUB COMPONENTS ---
 
-// Helper untuk Export Excel
-const exportTableToExcel = (tableId, filename = 'Laporan.xls') => {
-  const table = document.getElementById(tableId);
-  if (!table) return;
-  const html = table.outerHTML;
-  // Blob untuk format XLS (HTML based)
-  const blob = new Blob([`
-    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:x='urn:schemas-microsoft-com:office:excel' xmlns='http://www.w3.org/TR/REC-html40'>
-    <head><meta charset='utf-8'></head><body>${html}</body></html>
-  `], { type: 'application/vnd.ms-excel' });
-  
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-};
-
-function LaporanLengkap({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, sem }) {
-  const [view, setView] = useState('menu'); // menu, nilaiuh, analisis, rekapasli, rekapakhir
-  const [config, setConfig] = useState({ kelasId: '', mapel: '', uh: 'uh1' });
-
-  const handlePrint = () => window.print();
-  const handleExport = () => exportTableToExcel('laporan-table', `Laporan_${view}_${config.kelasId}.xls`);
-
-  const selectedKelasData = kelas.find(k => k.id === config.kelasId);
-  const selectedGuru = guru.find(g => g.mapel === config.mapel);
-  const docId = config.kelasId && config.mapel ? `${docPrefix}_${config.kelasId}_${config.mapel}` : null;
-  const currentData = nilaiData[docId] || { kktp: 75, scores: {}, weights: {uh:1, pts:1, pas:1}, tp: [] };
-  const filteredSiswa = siswa.filter(s => s.kelasId === config.kelasId);
-
-  // Helper Logic
-  const getEffectiveScore = (scores, uhKey) => {
-    if (!scores) return 0;
-    const original = parseFloat(scores[uhKey] || 0);
-    const remedial = scores[`remedial_${uhKey}`];
-    return (remedial !== undefined && remedial !== '' && !isNaN(remedial)) ? parseFloat(remedial) : original;
-  };
-
-  const calculateFinal = (scores, weights, useEffective = true) => {
-    if (!scores) return 0;
-    let sum = 0, count = 0;
-    ['uh1','uh2','uh3','uh4','uh5'].forEach(k => {
-      const val = useEffective ? getEffectiveScore(scores, k) : parseFloat(scores[k]||0);
-      if (val > 0) { sum += val; count++; }
-    });
-    const avg = count ? sum/count : 0;
-    const w = weights || {uh:1,pts:1,pas:1};
-    return ((avg*w.uh + (scores.pts||0)*w.pts + (scores.pas||0)*w.pas)/(w.uh+w.pts+w.pas));
-  };
-
-  // FORMAT TANGGAL INDONESIA (02 Desember 2025)
-  const today = new Date().toLocaleDateString('id-ID', {
-    day: '2-digit', 
-    month: 'long', 
-    year: 'numeric'
-  });
-
-  const ReportHeader = ({ title }) => (
-    <div className="text-center border-b-2 border-black pb-4 mb-6 hidden print:block">
-      <div className="flex items-center justify-center gap-4 mb-4">
-         {identitas.logoUrl && <img src={identitas.logoUrl} alt="Logo" className="h-24 w-24 object-contain"/>}
-         <div className="text-left">
-            <h1 className="text-2xl font-bold uppercase tracking-wide">{identitas.namaSekolah || 'NAMA SEKOLAH'}</h1>
-            <p className="text-sm font-medium">{identitas.alamat}</p>
-            {identitas.npsn && <p className="text-sm">NPSN: {identitas.npsn}</p>}
-         </div>
-      </div>
-      <h2 className="font-bold text-lg mt-2 uppercase border-t-2 border-black pt-2">{title}</h2>
-      <div className="flex justify-between text-sm mt-2 px-4 font-semibold">
-        <span>Mapel: {config.mapel}</span>
-        <span>Kelas: {selectedKelasData?.nama}</span>
-        <span>Tahun Pelajaran: {tp} ({sem})</span>
-      </div>
-    </div>
-  );
-
-  const ReportFooter = () => (
-    <div className="hidden print:flex justify-between mt-10 px-8 text-sm break-inside-avoid">
-       <div className="text-center"><p>Mengetahui,</p><p>Kepala Sekolah</p><br/><br/><br/><p className="font-bold underline">{identitas.kepsek}</p><p>NIP. {identitas.nipKepsek}</p></div>
-       <div className="text-center"><p>{identitas.kotaCetak}, {today}</p><p>Guru Mata Pelajaran</p><br/><br/><br/><p className="font-bold underline">{selectedGuru?.nama}</p><p>NIP. {selectedGuru?.nip}</p></div>
-    </div>
-  );
-
-  if (view === 'menu') {
-    return (
-      <div className="max-w-2xl mx-auto bg-white p-8 rounded shadow space-y-6">
-        <h2 className="text-2xl font-bold text-center mb-6">Pusat Laporan & Export</h2>
-        <div className="grid gap-4 bg-gray-50 p-4 rounded border">
-           <div className="grid grid-cols-2 gap-4">
-             <div><label className="font-bold text-xs">Kelas</label><select className="w-full border p-2 rounded" value={config.kelasId} onChange={e => setConfig({...config, kelasId: e.target.value})}><option value="">Pilih...</option>{kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}</select></div>
-             <div><label className="font-bold text-xs">Mapel</label><select className="w-full border p-2 rounded" value={config.mapel} onChange={e => setConfig({...config, mapel: e.target.value})}><option value="">Pilih...</option>{guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel}</option>)}</select></div>
-           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-           <button onClick={() => setView('nilaiuh')} className="p-4 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 flex flex-col items-center"><FileText size={24} className="mb-2 text-blue-600"/><span className="font-bold text-sm">Nilai Ulangan Harian</span><span className="text-xs text-gray-500">Nilai Murni per UH</span></button>
-           <button onClick={() => setView('analisis')} className="p-4 bg-purple-50 border border-purple-200 rounded hover:bg-purple-100 flex flex-col items-center"><BarChart2 size={24} className="mb-2 text-purple-600"/><span className="font-bold text-sm">Analisis Penilaian</span><span className="text-xs text-gray-500">Ketuntasan & Perbaikan</span></button>
-           <button onClick={() => setView('rekapasli')} className="p-4 bg-orange-50 border border-orange-200 rounded hover:bg-orange-100 flex flex-col items-center"><FileText size={24} className="mb-2 text-orange-600"/><span className="font-bold text-sm">Rekap Nilai Asli</span><span className="text-xs text-gray-500">Sebelum Remedial</span></button>
-           <button onClick={() => setView('rekapakhir')} className="p-4 bg-green-50 border border-green-200 rounded hover:bg-green-100 flex flex-col items-center"><GraduationCap size={24} className="mb-2 text-green-600"/><span className="font-bold text-sm">Rekap Nilai Akhir</span><span className="text-xs text-gray-500">Rapor (Setelah Remedial)</span></button>
-        </div>
-      </div>
-    )
-  }
-
-  // Common wrapper for reports
-  const ReportWrapper = ({ children, title }) => (
-    <div className="bg-white min-h-screen p-8 animate-in fade-in">
-      <div className="print:hidden flex justify-between mb-4 sticky top-0 bg-white/95 p-3 border-b z-50 shadow-sm">
-         <div className="flex items-center gap-2">
-            <button onClick={() => setView('menu')} className="text-gray-600 hover:text-gray-900 flex items-center gap-1 font-bold"><ChevronRight className="rotate-180" size={16}/> Kembali</button>
-            {view === 'analisis' && <select className="border p-1 rounded text-sm ml-2" value={config.uh} onChange={e=>setConfig({...config, uh: e.target.value})}>{[1,2,3,4,5].map(i=><option key={i} value={`uh${i}`}>UH {i}</option>)}</select>}
-         </div>
-         <div className="flex gap-2">
-            <button onClick={handleExport} className="bg-green-600 text-white px-3 py-1.5 rounded flex items-center gap-2 text-sm shadow hover:bg-green-700"><FileSpreadsheet size={16}/> Export Excel</button>
-            <button onClick={handlePrint} className="bg-blue-600 text-white px-3 py-1.5 rounded flex items-center gap-2 text-sm shadow hover:bg-blue-700"><Printer size={16}/> Cetak</button>
-         </div>
-      </div>
-      {config.kelasId && config.mapel ? (
-        <>
-          <ReportHeader title={title} />
-          {children}
-          <ReportFooter />
-        </>
-      ) : <div className="text-center p-10 text-gray-400">Silakan pilih kelas dan mapel kembali.</div>}
-    </div>
-  );
-
-  // 1. NILAI UH (MURNI)
-  if (view === 'nilaiuh') {
-    return (
-      <ReportWrapper title="DAFTAR NILAI ULANGAN HARIAN (MURNI)">
-        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
-          <thead className="bg-gray-100">
-            <tr><th className="border border-black p-2 w-10">No</th><th className="border border-black p-2 text-left">Nama Siswa</th><th className="border border-black p-2 w-12">UH1</th><th className="border border-black p-2 w-12">UH2</th><th className="border border-black p-2 w-12">UH3</th><th className="border border-black p-2 w-12">UH4</th><th className="border border-black p-2 w-12">UH5</th></tr>
-          </thead>
-          <tbody>
-            {filteredSiswa.map((s,i) => (
-              <tr key={s.id}>
-                <td className="border border-black p-1 text-center">{i+1}</td>
-                <td className="border border-black p-1">{s.nama}</td>
-                {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{currentData.scores[s.id]?.[`uh${u}`]||'-'}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </ReportWrapper>
-    )
-  }
-
-  // 2. ANALISIS UH
-  if (view === 'analisis') {
-    const uhIdx = parseInt(config.uh.slice(2));
-    const tpDesc = currentData.tp[uhIdx-1] || '-';
-    return (
-      <ReportWrapper title={`ANALISIS HASIL PENILAIAN (${config.uh.toUpperCase()})`}>
-        <div className="mb-4 text-sm border p-2"><strong>TP:</strong> {tpDesc} | <strong>KKTP:</strong> {currentData.kktp}</div>
-        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
-          <thead className="bg-gray-100">
-            <tr><th className="border border-black p-2">No</th><th className="border border-black p-2 text-left">Nama</th><th className="border border-black p-2">Nilai</th><th className="border border-black p-2">Ketuntasan</th><th className="border border-black p-2">Tindak Lanjut</th><th className="border border-black p-2">Nilai Perbaikan</th><th className="border border-black p-2">Catatan</th></tr>
-          </thead>
-          <tbody>
-            {filteredSiswa.map((s,i) => {
-              const val = currentData.scores[s.id]?.[config.uh] || 0;
-              const tuntas = val >= currentData.kktp;
-              const rem = currentData.scores[s.id]?.[`remedial_${config.uh}`] || '-';
-              const note = currentData.scores[s.id]?.[`note_${config.uh}`] || '-';
-              return (
-                <tr key={s.id}>
-                  <td className="border border-black p-1 text-center">{i+1}</td>
-                  <td className="border border-black p-1">{s.nama}</td>
-                  <td className="border border-black p-1 text-center">{val}</td>
-                  <td className="border border-black p-1 text-center">{tuntas?'Tuntas':'Belum'}</td>
-                  <td className="border border-black p-1 text-center">{tuntas?'Pengayaan':'Remedial'}</td>
-                  <td className="border border-black p-1 text-center">{rem}</td>
-                  <td className="border border-black p-1">{note}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </ReportWrapper>
-    )
-  }
-
-  // 3. REKAP NILAI ASLI (BELUM REMIDI)
-  if (view === 'rekapasli') {
-    return (
-      <ReportWrapper title="REKAP NILAI ASLI (PRA-REMEDIAL)">
-        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="border border-black p-2" rowSpan="2">No</th><th className="border border-black p-2 text-left" rowSpan="2">Nama</th>
-              <th className="border border-black p-1" colSpan="5">Nilai UH (Murni)</th>
-              <th className="border border-black p-2" rowSpan="2">Rata UH</th><th className="border border-black p-2" rowSpan="2">PTS</th><th className="border border-black p-2" rowSpan="2">PAS</th><th className="border border-black p-2" rowSpan="2">NA Murni</th>
-            </tr>
-            <tr>{[1,2,3,4,5].map(i=><th key={i} className="border border-black p-1 w-8">{i}</th>)}</tr>
-          </thead>
-          <tbody>
-            {filteredSiswa.map((s,i) => {
-              const sc = currentData.scores[s.id] || {};
-              const finalMurni = calculateFinal(sc, currentData.weights, false);
-              let sum=0, c=0; ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{if(sc[k]>0){sum+=parseFloat(sc[k]);c++}});
-              const avg = c?sum/c:0;
-              return (
-                <tr key={s.id}>
-                  <td className="border border-black p-1 text-center">{i+1}</td>
-                  <td className="border border-black p-1">{s.nama}</td>
-                  {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{sc[`uh${u}`]||'-'}</td>)}
-                  <td className="border border-black p-1 text-center font-bold bg-gray-50">{avg.toFixed(0)}</td>
-                  <td className="border border-black p-1 text-center">{sc.pts||'-'}</td>
-                  <td className="border border-black p-1 text-center">{sc.pas||'-'}</td>
-                  <td className="border border-black p-1 text-center font-bold">{finalMurni.toFixed(0)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </ReportWrapper>
-    )
-  }
-
-  // 4. REKAP NILAI AKHIR (RAPOR)
-  if (view === 'rekapakhir') {
-    return (
-      <ReportWrapper title="REKAP NILAI AKHIR (RAPOR)">
-        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="border border-black p-2" rowSpan="2">No</th><th className="border border-black p-2 text-left" rowSpan="2">Nama</th>
-              <th className="border border-black p-1" colSpan="5">Nilai UH (Efektif/Setelah Remidi)</th>
-              <th className="border border-black p-2" rowSpan="2">Rata UH</th><th className="border border-black p-2" rowSpan="2">PTS</th><th className="border border-black p-2" rowSpan="2">PAS</th><th className="border border-black p-2 bg-gray-200" rowSpan="2">NA Akhir</th><th className="border border-black p-2" rowSpan="2">Ket</th>
-            </tr>
-            <tr>{[1,2,3,4,5].map(i=><th key={i} className="border border-black p-1 w-8">{i}</th>)}</tr>
-          </thead>
-          <tbody>
-            {filteredSiswa.map((s,i) => {
-              const sc = currentData.scores[s.id] || {};
-              const final = calculateFinal(sc, currentData.weights, true);
-              let sum=0, c=0; ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{const v=getEffectiveScore(sc,k);if(v>0){sum+=v;c++}});
-              const avg = c?sum/c:0;
-              return (
-                <tr key={s.id}>
-                  <td className="border border-black p-1 text-center">{i+1}</td>
-                  <td className="border border-black p-1">{s.nama}</td>
-                  {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{getEffectiveScore(sc,`uh${u}`)||'-'}</td>)}
-                  <td className="border border-black p-1 text-center font-bold bg-blue-50">{avg.toFixed(0)}</td>
-                  <td className="border border-black p-1 text-center bg-yellow-50">{sc.pts||'-'}</td>
-                  <td className="border border-black p-1 text-center bg-green-50">{sc.pas||'-'}</td>
-                  <td className="border border-black p-1 text-center font-bold bg-gray-200">{final.toFixed(0)}</td>
-                  <td className="border border-black p-1 text-center text-xs">{final>=currentData.kktp?'Tuntas':'Belum'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </ReportWrapper>
-    )
-  }
-}
-
-// --- SUB COMPONENTS LAIN (ConfigErrorScreen, AuthScreen, dll tetap sama) ---
-
 function ConfigErrorScreen({ error }) {
   return (
     <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
@@ -637,6 +398,7 @@ function Pengaturan({ identitas, guru, onSaveIdentitas, onSaveGuru }) {
     }
   };
 
+function ConfigErrorScreen({ error }) {
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div className="bg-white p-6 rounded shadow">
@@ -720,6 +482,7 @@ function DataSiswa({ siswa, kelas, onSave, onDelete }) {
 
   const filtered = filter ? siswa.filter(s=>s.kelasId===filter) : siswa;
 
+function MenuItem({ icon, label, active, onClick }) {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex justify-between border-b pb-2">
@@ -868,9 +631,9 @@ function Analisis({ siswa, kelas, guru, docPrefix, nilaiData, onSaveNilai }) {
   )
 }
 
-// --- KOMPONEN NILAI AKHIR (DIPERTAHANKAN) ---
 function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, sem }) {
   const [config, setConfig] = useState({ kelasId: '', mapel: '' });
+  const [orientation, setOrientation] = useState('landscape');
   
   const handlePrint = () => window.print();
   const selectedKelasData = kelas.find(k => k.id === config.kelasId);
@@ -885,15 +648,13 @@ function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, s
     return (remedial !== undefined && remedial !== '' && !isNaN(remedial)) ? parseFloat(remedial) : original;
   };
 
-  // FORMAT TANGGAL INDONESIA (02 Desember 2025)
-  const today = new Date().toLocaleDateString('id-ID', {
-    day: '2-digit', 
-    month: 'long', 
-    year: 'numeric'
-  });
+  const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
 
   return (
     <div className="bg-white min-h-screen p-8 animate-in fade-in">
+      {/* STYLE PAGE ORIENTATION KHUSUS NILAI AKHIR */}
+      <style>{`@media print { @page { size: ${orientation}; } }`}</style>
+
       <div className="print:hidden flex justify-between mb-4 sticky top-0 bg-white/90 backdrop-blur p-2 border-b z-10 items-center">
          <div className="flex gap-2">
             <select className="border border-gray-300 p-2 rounded" value={config.kelasId} onChange={e => setConfig({...config, kelasId: e.target.value})}>
@@ -905,24 +666,41 @@ function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, s
               {guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel}</option>)}
             </select>
          </div>
-         <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 shadow-lg"><Printer size={16}/> Cetak</button>
+         <div className="flex gap-2 items-center">
+            <select className="border border-gray-300 p-2 rounded text-sm" value={orientation} onChange={e=>setOrientation(e.target.value)}>
+                <option value="landscape">Landscape</option>
+                <option value="portrait">Portrait</option>
+            </select>
+            <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 shadow-lg"><Printer size={16}/> Cetak</button>
+         </div>
       </div>
 
       {config.kelasId && config.mapel && currentData ? (
         <>
-          <div className="text-center border-b-2 border-black pb-4 mb-6 hidden print:block">
-            <div className="flex items-center justify-center gap-4 mb-2">
-               {identitas.logoUrl && <img src={identitas.logoUrl} alt="Logo" className="h-24 w-24 object-contain"/>}
-               <div>
-                  <h1 className="text-2xl font-bold uppercase">{identitas.namaSekolah}</h1>
-                  <p className="text-sm">{identitas.alamat}</p>
-               </div>
+          <div className="mb-6 hidden print:block">
+            {/* KOP SECTION */}
+            <div className="border-b-4 border-double border-black pb-2 mb-4">
+                <div className="flex items-center gap-4">
+                   <div className="w-24 h-24 flex-shrink-0 flex items-center justify-center">
+                      {identitas.logoUrl && <img src={identitas.logoUrl} alt="Logo" className="w-full h-full object-contain"/>}
+                   </div>
+                   <div className="flex-1 text-center">
+                      <h3 className="text-xl font-bold uppercase m-0 leading-tight tracking-wide">PEMERINTAH KABUPATEN KEBUMEN</h3>
+                      <h3 className="text-lg font-bold uppercase m-0 leading-tight tracking-wide">DINAS PENDIDIKAN PEMUDA DAN OLAH RAGA</h3>
+                      <h1 className="text-2xl font-bold uppercase m-0 mt-2 leading-tight">{identitas.namaSekolah || 'NAMA SEKOLAH'}</h1>
+                      <p className="text-sm m-0 italic">{identitas.alamat}</p>
+                   </div>
+                </div>
             </div>
-            <h2 className="font-bold text-lg mt-2 uppercase">LAPORAN NILAI AKHIR (FIX)</h2>
-            <div className="flex justify-between text-sm mt-4 px-10 font-semibold border-t border-dashed pt-2">
-              <span>Mapel: {config.mapel}</span>
-              <span>Kelas: {selectedKelasData?.nama}</span>
-              <span>Tahun Pelajaran: {tp} ({sem})</span>
+
+            {/* TITLE & DETAILS SECTION (Below Line) */}
+            <div className="text-center">
+                <h2 className="font-bold text-lg uppercase underline">LAPORAN NILAI AKHIR (FIX)</h2>
+                <div className="flex justify-between text-sm mt-2 px-4 font-semibold">
+                  <span>Mapel: {config.mapel}</span>
+                  <span>Kelas: {selectedKelasData?.nama}</span>
+                  <span>Tahun Pelajaran: {tp} ({sem})</span>
+                </div>
             </div>
           </div>
 
@@ -930,7 +708,9 @@ function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, s
             <thead>
               <tr className="bg-gray-200">
                 <th rowSpan="2" className="border border-black p-2 w-8">No</th>
+                <th rowSpan="2" className="border border-black p-2 w-20">NIS</th>
                 <th rowSpan="2" className="border border-black p-2 text-left">Nama Siswa</th>
+                <th rowSpan="2" className="border border-black p-2 w-12 text-center">L/P</th>
                 <th colSpan="5" className="border border-black p-1">Nilai Ulangan Harian (Efektif)</th>
                 <th rowSpan="2" className="border border-black p-2 w-12 bg-blue-50">Rata UH</th>
                 <th rowSpan="2" className="border border-black p-2 w-12 bg-yellow-50">PTS</th>
@@ -965,7 +745,9 @@ function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, s
                 return (
                   <tr key={s.id}>
                     <td className="border border-black p-1 text-center">{idx+1}</td>
+                    <td className="border border-black p-1 text-center">{s.nis}</td>
                     <td className="border border-black p-1 pl-2 font-medium">{s.nama}</td>
+                    <td className="border border-black p-1 text-center">{s.gender}</td>
                     <td className="border border-black p-1 text-center">{effUH1 || '-'}</td>
                     <td className="border border-black p-1 text-center">{effUH2 || '-'}</td>
                     <td className="border border-black p-1 text-center">{effUH3 || '-'}</td>
@@ -986,6 +768,11 @@ function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, s
              <div className="text-center"><p>Mengetahui,</p><p>Kepala Sekolah</p><br/><br/><br/><p className="font-bold underline">{identitas.kepsek}</p><p>NIP. {identitas.nipKepsek}</p></div>
              <div className="text-center"><p>{identitas.kotaCetak}, {today}</p><p>Guru Mata Pelajaran</p><br/><br/><br/><p className="font-bold underline">.........................</p><p>NIP. .........................</p></div>
           </div>
+
+          {/* FOOTER ARSIP */}
+          <div className="hidden print:block mt-4 text-[8pt] italic text-gray-500">
+            Laporan Nilai Akhir_{config.mapel}_{selectedKelasData?.nama}_{tp}_{sem}
+          </div>
         </>
       ) : (
         <div className="text-center p-10 text-gray-500 border-2 border-dashed rounded">Silakan pilih Kelas dan Mapel, atau pastikan data nilai sudah diinput.</div>
@@ -994,9 +781,289 @@ function NilaiAkhir({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, s
   );
 }
 
-const InputGroup = ({ label, value, onChange, type="text" }) => (
-  <div className="w-full">
-    <label className="text-sm font-medium text-gray-700 mb-1 block">{label}</label>
-    <input type={type} className="w-full border border-gray-300 rounded p-2 focus:outline-none" value={value || ''} onChange={(e) => onChange(e.target.value)} />
-  </div>
-);
+function LaporanLengkap({ identitas, siswa, kelas, guru, docPrefix, nilaiData, tp, sem }) {
+  const [view, setView] = useState('menu'); // menu, nilaiuh, analisis, rekapasli, rekapakhir
+  const [config, setConfig] = useState({ kelasId: '', mapel: '', uh: 'uh1' });
+  const [orientation, setOrientation] = useState('landscape'); // State orientasi
+
+  const handlePrint = () => window.print();
+  const handleExport = () => exportTableToExcel('laporan-table', `Laporan_${view}_${config.kelasId}.xls`);
+
+  const selectedKelasData = kelas.find(k => k.id === config.kelasId);
+  const selectedGuru = guru.find(g => g.mapel === config.mapel);
+  const docId = config.kelasId && config.mapel ? `${docPrefix}_${config.kelasId}_${config.mapel}` : null;
+  const currentData = nilaiData[docId] || { kktp: 75, scores: {}, weights: {uh:1, pts:1, pas:1}, tp: [] };
+  const filteredSiswa = siswa.filter(s => s.kelasId === config.kelasId);
+
+  // Helper Logic
+  const getEffectiveScore = (scores, uhKey) => {
+    if (!scores) return 0;
+    const original = parseFloat(scores[uhKey] || 0);
+    const remedial = scores[`remedial_${uhKey}`];
+    return (remedial !== undefined && remedial !== '' && !isNaN(remedial)) ? parseFloat(remedial) : original;
+  };
+
+  const calculateFinal = (scores, weights, useEffective = true) => {
+    if (!scores) return 0;
+    let sum = 0, count = 0;
+    ['uh1','uh2','uh3','uh4','uh5'].forEach(k => {
+      const val = useEffective ? getEffectiveScore(scores, k) : parseFloat(scores[k]||0);
+      if (val > 0) { sum += val; count++; }
+    });
+    const avg = count ? sum/count : 0;
+    const w = weights || {uh:1,pts:1,pas:1};
+    return ((avg*w.uh + (scores.pts||0)*w.pts + (scores.pas||0)*w.pas)/(w.uh+w.pts+w.pas));
+  };
+
+  const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  const ReportHeader = ({ title }) => (
+    <div className="mb-6 hidden print:block">
+      {/* KOP SECTION */}
+      <div className="border-b-4 border-double border-black pb-2 mb-4">
+          <div className="flex items-center gap-4">
+             <div className="w-24 h-24 flex-shrink-0 flex items-center justify-center">
+                {identitas.logoUrl && <img src={identitas.logoUrl} alt="Logo" className="w-full h-full object-contain"/>}
+             </div>
+             <div className="flex-1 text-center">
+                <h3 className="text-xl font-bold uppercase m-0 leading-tight tracking-wide">PEMERINTAH KABUPATEN KEBUMEN</h3>
+                <h3 className="text-lg font-bold uppercase m-0 leading-tight tracking-wide">DINAS PENDIDIKAN PEMUDA DAN OLAH RAGA</h3>
+                <h1 className="text-2xl font-bold uppercase m-0 mt-2 leading-tight">{identitas.namaSekolah || 'NAMA SEKOLAH'}</h1>
+                <p className="text-sm m-0 italic">{identitas.alamat}</p>
+             </div>
+          </div>
+      </div>
+
+      {/* TITLE & DETAILS SECTION (Below Line) */}
+      <div className="text-center">
+        <h2 className="font-bold text-lg uppercase underline">{title}</h2>
+        <div className="flex justify-between text-sm mt-2 px-4 font-semibold">
+          <span>Mata Pelajaran: {config.mapel}</span>
+          <span>Kelas: {selectedKelasData?.nama}</span>
+          <span>Tahun Pelajaran: {tp} ({sem})</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const ReportFooter = () => (
+    <div className="hidden print:flex justify-between mt-10 px-8 text-sm break-inside-avoid">
+       <div className="text-center"><p>Mengetahui,</p><p>Kepala Sekolah</p><br/><br/><br/><p className="font-bold underline">{identitas.kepsek}</p><p>NIP. {identitas.nipKepsek}</p></div>
+       <div className="text-center"><p>{identitas.kotaCetak}, {today}</p><p>Guru Mata Pelajaran</p><br/><br/><br/><p className="font-bold underline">{selectedGuru?.nama}</p><p>NIP. {selectedGuru?.nip}</p></div>
+    </div>
+  );
+
+  if (view === 'menu') {
+    return (
+      <div className="max-w-2xl mx-auto bg-white p-8 rounded shadow space-y-6">
+        <h2 className="text-2xl font-bold text-center mb-6">Pusat Laporan & Export</h2>
+        <div className="grid gap-4 bg-gray-50 p-4 rounded border">
+           <div className="grid grid-cols-2 gap-4">
+             <div><label className="font-bold text-xs">Kelas</label><select className="w-full border p-2 rounded" value={config.kelasId} onChange={e => setConfig({...config, kelasId: e.target.value})}><option value="">Pilih...</option>{kelas.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}</select></div>
+             <div><label className="font-bold text-xs">Mapel</label><select className="w-full border p-2 rounded" value={config.mapel} onChange={e => setConfig({...config, mapel: e.target.value})}><option value="">Pilih...</option>{guru.map(g => <option key={g.id} value={g.mapel}>{g.mapel}</option>)}</select></div>
+           </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+           <button onClick={() => setView('nilaiuh')} className="p-4 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 flex flex-col items-center"><FileText size={24} className="mb-2 text-blue-600"/><span className="font-bold text-sm">Nilai Ulangan Harian</span><span className="text-xs text-gray-500">Nilai Murni per UH</span></button>
+           <button onClick={() => setView('analisis')} className="p-4 bg-purple-50 border border-purple-200 rounded hover:bg-purple-100 flex flex-col items-center"><BarChart2 size={24} className="mb-2 text-purple-600"/><span className="font-bold text-sm">Analisis Penilaian</span><span className="text-xs text-gray-500">Ketuntasan & Perbaikan</span></button>
+           <button onClick={() => setView('rekapasli')} className="p-4 bg-orange-50 border border-orange-200 rounded hover:bg-orange-100 flex flex-col items-center"><FileText size={24} className="mb-2 text-orange-600"/><span className="font-bold text-sm">Rekap Nilai Asli</span><span className="text-xs text-gray-500">Sebelum Remedial</span></button>
+           <button onClick={() => setView('rekapakhir')} className="p-4 bg-green-50 border border-green-200 rounded hover:bg-green-100 flex flex-col items-center"><GraduationCap size={24} className="mb-2 text-green-600"/><span className="font-bold text-sm">Rekap Nilai Akhir</span><span className="text-xs text-gray-500">Rapor (Setelah Remedial)</span></button>
+        </div>
+      </div>
+    )
+  }
+
+  const ReportWrapper = ({ children, title }) => (
+    <div className="bg-white min-h-screen p-8 animate-in fade-in">
+      {/* STYLE PAGE ORIENTATION KHUSUS LAPORAN LENGKAP */}
+      <style>{`@media print { @page { size: ${orientation}; } }`}</style>
+
+      <div className="print:hidden flex justify-between mb-4 sticky top-0 bg-white/95 p-3 border-b z-50 shadow-sm">
+         <div className="flex items-center gap-2">
+            <button onClick={() => setView('menu')} className="text-gray-600 hover:text-gray-900 flex items-center gap-1 font-bold"><ChevronRight className="rotate-180" size={16}/> Kembali</button>
+            {view === 'analisis' && <select className="border p-1 rounded text-sm ml-2" value={config.uh} onChange={e=>setConfig({...config, uh: e.target.value})}>{[1,2,3,4,5].map(i=><option key={i} value={`uh${i}`}>UH {i}</option>)}</select>}
+         </div>
+         <div className="flex gap-2 items-center">
+            <select className="border border-gray-300 p-2 rounded text-sm" value={orientation} onChange={e=>setOrientation(e.target.value)}>
+                <option value="landscape">Landscape</option>
+                <option value="portrait">Portrait</option>
+            </select>
+            <button onClick={handleExport} className="bg-green-600 text-white px-3 py-1.5 rounded flex items-center gap-2 text-sm shadow hover:bg-green-700"><FileSpreadsheet size={16}/> Export Excel</button>
+            <button onClick={handlePrint} className="bg-blue-600 text-white px-3 py-1.5 rounded flex items-center gap-2 text-sm shadow hover:bg-blue-700"><Printer size={16}/> Cetak</button>
+         </div>
+      </div>
+      {config.kelasId && config.mapel ? (
+        <>
+          <ReportHeader title={title} />
+          {children}
+          <ReportFooter />
+          <div className="hidden print:block mt-4 text-[8pt] italic text-gray-500">
+            {title}_{config.mapel}_{selectedKelasData?.nama}_{tp}_{sem}
+          </div>
+        </>
+      ) : <div className="text-center p-10 text-gray-400">Silakan pilih kelas dan mapel kembali.</div>}
+    </div>
+  );
+
+  if (view === 'nilaiuh') {
+    return (
+      <ReportWrapper title="DAFTAR NILAI ULANGAN HARIAN (MURNI)">
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="border border-black p-2 w-10">No</th>
+              <th className="border border-black p-2 w-20">NIS</th>
+              <th className="border border-black p-2 text-left">Nama Siswa</th>
+              <th className="border border-black p-2 w-12 text-center">L/P</th>
+              <th className="border border-black p-2 w-12">UH1</th>
+              <th className="border border-black p-2 w-12">UH2</th>
+              <th className="border border-black p-2 w-12">UH3</th>
+              <th className="border border-black p-2 w-12">UH4</th>
+              <th className="border border-black p-2 w-12">UH5</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => (
+              <tr key={s.id}>
+                <td className="border border-black p-1 text-center">{i+1}</td>
+                <td className="border border-black p-1 text-center">{s.nis}</td>
+                <td className="border border-black p-1">{s.nama}</td>
+                <td className="border border-black p-1 text-center">{s.gender}</td>
+                {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{currentData.scores[s.id]?.[`uh${u}`]||'-'}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+
+  if (view === 'analisis') {
+    const uhIdx = parseInt(config.uh.slice(2));
+    const tpDesc = currentData.tp[uhIdx-1] || '-';
+    return (
+      <ReportWrapper title={`ANALISIS HASIL PENILAIAN (${config.uh.toUpperCase()})`}>
+        <div className="mb-4 text-sm border p-2"><strong>TP:</strong> {tpDesc} | <strong>KKTP:</strong> {currentData.kktp}</div>
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="border border-black p-2">No</th>
+              <th className="border border-black p-2 w-20">NIS</th>
+              <th className="border border-black p-2 text-left">Nama</th>
+              <th className="border border-black p-2 w-12 text-center">L/P</th>
+              <th className="border border-black p-2">Nilai</th>
+              <th className="border border-black p-2">Ketuntasan</th>
+              <th className="border border-black p-2">Tindak Lanjut</th>
+              <th className="border border-black p-2">Nilai Perbaikan</th>
+              <th className="border border-black p-2">Catatan</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => {
+              const val = currentData.scores[s.id]?.[config.uh] || 0;
+              const tuntas = val >= currentData.kktp;
+              const rem = currentData.scores[s.id]?.[`remedial_${config.uh}`] || '-';
+              const note = currentData.scores[s.id]?.[`note_${config.uh}`] || '-';
+              return (
+                <tr key={s.id}>
+                  <td className="border border-black p-1 text-center">{i+1}</td>
+                  <td className="border border-black p-1 text-center">{s.nis}</td>
+                  <td className="border border-black p-1">{s.nama}</td>
+                  <td className="border border-black p-1 text-center">{s.gender}</td>
+                  <td className="border border-black p-1 text-center">{val}</td>
+                  <td className="border border-black p-1 text-center">{tuntas?'Tuntas':'Belum'}</td>
+                  <td className="border border-black p-1 text-center">{tuntas?'Pengayaan':'Remedial'}</td>
+                  <td className="border border-black p-1 text-center">{rem}</td>
+                  <td className="border border-black p-1">{note}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+
+  if (view === 'rekapasli') {
+    return (
+      <ReportWrapper title="REKAP NILAI ASLI (PRA-REMEDIAL)">
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="border border-black p-2" rowSpan="2">No</th>
+              <th className="border border-black p-2" rowSpan="2">NIS</th>
+              <th className="border border-black p-2 text-left" rowSpan="2">Nama</th>
+              <th className="border border-black p-2 w-12 text-center" rowSpan="2">L/P</th>
+              <th className="border border-black p-1" colSpan="5">Nilai UH (Murni)</th>
+              <th className="border border-black p-2" rowSpan="2">Rata UH</th><th className="border border-black p-2" rowSpan="2">PTS</th><th className="border border-black p-2" rowSpan="2">PAS</th><th className="border border-black p-2" rowSpan="2">NA Murni</th>
+            </tr>
+            <tr>{[1,2,3,4,5].map(i=><th key={i} className="border border-black p-1 w-8">{i}</th>)}</tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => {
+              const sc = currentData.scores[s.id] || {};
+              const finalMurni = calculateFinal(sc, currentData.weights, false);
+              let sum=0, c=0; ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{if(sc[k]>0){sum+=parseFloat(sc[k]);c++}});
+              const avg = c?sum/c:0;
+              return (
+                <tr key={s.id}>
+                  <td className="border border-black p-1 text-center">{i+1}</td>
+                  <td className="border border-black p-1 text-center">{s.nis}</td>
+                  <td className="border border-black p-1">{s.nama}</td>
+                  <td className="border border-black p-1 text-center">{s.gender}</td>
+                  {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{sc[`uh${u}`]||'-'}</td>)}
+                  <td className="border border-black p-1 text-center font-bold bg-gray-50">{avg.toFixed(0)}</td>
+                  <td className="border border-black p-1 text-center">{sc.pts||'-'}</td>
+                  <td className="border border-black p-1 text-center">{sc.pas||'-'}</td>
+                  <td className="border border-black p-1 text-center font-bold">{finalMurni.toFixed(0)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+
+  if (view === 'rekapakhir') {
+    return (
+      <ReportWrapper title="REKAP NILAI AKHIR (RAPOR)">
+        <table id="laporan-table" className="w-full border-collapse border border-black text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="border border-black p-2" rowSpan="2">No</th>
+              <th className="border border-black p-2" rowSpan="2">NIS</th>
+              <th className="border border-black p-2 text-left" rowSpan="2">Nama</th>
+              <th className="border border-black p-2 w-12 text-center" rowSpan="2">L/P</th>
+              <th className="border border-black p-1" colSpan="5">Nilai UH (Efektif/Setelah Remidi)</th>
+              <th className="border border-black p-2" rowSpan="2">Rata UH</th><th className="border border-black p-2" rowSpan="2">PTS</th><th className="border border-black p-2" rowSpan="2">PAS</th><th className="border border-black p-2 bg-gray-200" rowSpan="2">NA Akhir</th><th className="border border-black p-2" rowSpan="2">Ket</th>
+            </tr>
+            <tr>{[1,2,3,4,5].map(i=><th key={i} className="border border-black p-1 w-8">{i}</th>)}</tr>
+          </thead>
+          <tbody>
+            {filteredSiswa.map((s,i) => {
+              const sc = currentData.scores[s.id] || {};
+              const final = calculateFinal(sc, currentData.weights, true);
+              let sum=0, c=0; ['uh1','uh2','uh3','uh4','uh5'].forEach(k=>{const v=getEffectiveScore(sc,k);if(v>0){sum+=v;c++}});
+              const avg = c?sum/c:0;
+              return (
+                <tr key={s.id}>
+                  <td className="border border-black p-1 text-center">{i+1}</td>
+                  <td className="border border-black p-1 text-center">{s.nis}</td>
+                  <td className="border border-black p-1">{s.nama}</td>
+                  <td className="border border-black p-1 text-center">{s.gender}</td>
+                  {[1,2,3,4,5].map(u=><td key={u} className="border border-black p-1 text-center">{getEffectiveScore(sc,`uh${u}`)||'-'}</td>)}
+                  <td className="border border-black p-1 text-center font-bold bg-blue-50">{avg.toFixed(0)}</td>
+                  <td className="border border-black p-1 text-center bg-yellow-50">{sc.pts||'-'}</td>
+                  <td className="border border-black p-1 text-center bg-green-50">{sc.pas||'-'}</td>
+                  <td className="border border-black p-1 text-center font-bold bg-gray-200">{final.toFixed(0)}</td>
+                  <td className="border border-black p-1 text-center text-xs">{final>=currentData.kktp?'Tuntas':'Belum'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </ReportWrapper>
+    )
+  }
+}

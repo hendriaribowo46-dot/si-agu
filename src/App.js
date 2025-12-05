@@ -398,7 +398,6 @@ function Pengaturan({ identitas, guru, onSaveIdentitas, onSaveGuru }) {
     }
   };
 
-function ConfigErrorScreen({ error }) {
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div className="bg-white p-6 rounded shadow">
@@ -482,7 +481,6 @@ function DataSiswa({ siswa, kelas, onSave, onDelete }) {
 
   const filtered = filter ? siswa.filter(s=>s.kelasId===filter) : siswa;
 
-function MenuItem({ icon, label, active, onClick }) {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex justify-between border-b pb-2">

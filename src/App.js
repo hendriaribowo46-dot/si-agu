@@ -1067,3 +1067,4 @@ function LaporanLengkap({ identitas, siswa, kelas, guru, docPrefix, nilaiData, t
     )
   }
 }
+}
